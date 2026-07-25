@@ -1,0 +1,14 @@
+mode=zns op_frac=0.070 qd=32 zone_luns=64 susp=0 kv_ruhs=1 raw_GiB=16.00 usable_GiB=15.88
+events=1127079 meas_window_s=2655.1 makespan_s=3537.1 turns=278
+user_wr_pgs=20627456 user_rd_pgs=7913472 gc_copy_pgs=0 host_copy_pgs=0 total_run_user_wr_pgs=26476544
+WAF=1.0000
+erases=88768 zone_resets=1379 erases_per_user_GB=1050.632
+gc_count=0 gc_busy_s=0.000 gc_busy_pct=0.000 gc_max_ms=0.000
+user_write_MBps=31.82 user_read_MBps=12.21 turns_per_hour=376.9
+LAT kv_read_cmd n=247296 sampled=30912 mean_us=674.0 p50_us=640 p90_us=800 p99_us=1920 p999_us=3840 p9999_us=5840 max_us=5840
+LAT kv_write_cmd n=644608 sampled=644608 mean_us=2997.7 p50_us=3200 p90_us=3200 p99_us=5200 p999_us=6800 p9999_us=8400 max_us=8400
+LAT resume_burst n=1932 sampled=1932 mean_us=2936.1 p50_us=2560 p90_us=4480 p99_us=7680 p999_us=16054 p9999_us=17360 max_us=17360
+LAT turn_storage_stall n=278 sampled=278 mean_us=264819.9 p50_us=149360 p90_us=602560 p99_us=2160720 p999_us=2996560 p9999_us=2996560 max_us=2996560
+LAT ttft_stall_miss_turn n=278 sampled=278 mean_us=20404.6 p50_us=2560 p90_us=56320 p99_us=215040 p999_us=309760 p9999_us=309760 max_us=309760
+WEAR erase_max=7 erase_mean=5.96 spread=1.18
+INVARIANT zns zones_in_use=225 free=29 total=256

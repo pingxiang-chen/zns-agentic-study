@@ -1,0 +1,21 @@
+mode=fdp op_frac=0.070 qd=32 zone_luns=0 susp=0 kv_ruhs=8 raw_GiB=16.00 usable_GiB=14.88
+events=17940260 meas_window_s=5446.6 makespan_s=7846.6 turns=4122
+user_wr_pgs=31872758 user_rd_pgs=362359824 gc_copy_pgs=37416889 host_copy_pgs=0 total_run_user_wr_pgs=47738499
+WAF=2.1739
+erases=271104 zone_resets=0 erases_per_user_GB=2076.617
+gc_count=4236 gc_busy_s=149.946 gc_busy_pct=2.753 gc_max_ms=56.400
+user_write_MBps=23.97 user_read_MBps=272.51 turns_per_hour=2724.5
+LAT kv_read_cmd n=11324156 sampled=1415519 mean_us=707.2 p50_us=640 p90_us=840 p99_us=1640 p999_us=4520 p9999_us=25948 max_us=55657
+LAT kv_write_cmd n=995617 sampled=995617 mean_us=3255.5 p50_us=3200 p90_us=3572 p99_us=6600 p999_us=37094 p9999_us=52229 max_us=59078
+LAT memlog_write_cmd n=7688 sampled=7688 mean_us=1458.9 p50_us=200 p90_us=610 p99_us=35856 p999_us=46528 p9999_us=49259 max_us=52880
+LAT memlog_read_cmd n=15328 sampled=15328 mean_us=648.1 p50_us=40 p90_us=40 p99_us=36860 p999_us=50664 p9999_us=52653 max_us=52870
+LAT index_write_cmd n=30752 sampled=30752 mean_us=936.3 p50_us=200 p90_us=200 p99_us=43065 p999_us=52596 p9999_us=54399 max_us=55444
+LAT index_read_cmd n=15328 sampled=15328 mean_us=945.3 p50_us=40 p90_us=40 p99_us=41585 p999_us=51435 p9999_us=53441 max_us=53744
+LAT resume_burst n=3656 sampled=3656 mean_us=68892.2 p50_us=62040 p90_us=114799 p99_us=181040 p999_us=403363 p9999_us=535579 max_us=535579
+LAT turn_storage_stall n=4122 sampled=4122 mean_us=102916.4 p50_us=80800 p90_us=178040 p99_us=473588 p999_us=634869 p9999_us=723789 max_us=723789
+LAT ttft_stall_hit_turn n=176 sampled=176 mean_us=9687.6 p50_us=320 p90_us=6467 p99_us=244017 p999_us=355879 p9999_us=355879 max_us=355879
+LAT ttft_stall_miss_turn n=3656 sampled=3656 mean_us=75106.1 p50_us=63554 p90_us=121314 p99_us=350001 p999_us=501661 p9999_us=611669 max_us=611669
+GCDUR n=4236 p50_ms=44.72 p99_ms=56.08 max_ms=56.40
+WEAR erase_max=34 erase_mean=22.86 spread=1.49
+INVARIANT conv valid_pgs=3005392 sum_line_vpc=3005392 rmap_mapped=3005392 OK
+INVARIANT conv free_pgs=895310 usable=3900702 live_frac_of_raw=0.7165

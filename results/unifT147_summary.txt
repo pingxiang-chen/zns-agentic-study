@@ -1,0 +1,13 @@
+mode=conv op_frac=0.147 qd=32 zone_luns=0 susp=0 kv_ruhs=1 raw_GiB=16.00 usable_GiB=13.65
+events=894432 meas_window_s=1.6 makespan_s=179.6 turns=1
+user_wr_pgs=73024 user_rd_pgs=0 gc_copy_pgs=273672 host_copy_pgs=0 total_run_user_wr_pgs=14310912
+WAF=4.7477
+erases=1344 zone_resets=0 erases_per_user_GB=4493.386
+gc_count=21 gc_busy_s=1.079 gc_busy_pct=68.819 gc_max_ms=51.840
+user_write_MBps=190.80 user_read_MBps=0.00 turns_per_hour=2296.4
+LAT index_write_cmd n=2282 sampled=2282 mean_us=672.0 p50_us=200 p90_us=200 p99_us=200 p999_us=51839 p9999_us=51919 max_us=51919
+LAT turn_storage_stall n=1 sampled=1 mean_us=1533539.0 p50_us=1533539 p90_us=1533539 p99_us=1533539 p999_us=1533539 p9999_us=1533539 max_us=1533539
+GCDUR n=21 p50_ms=51.36 p99_ms=51.84 max_ms=51.84
+WEAR erase_max=9 erase_mean=7.87 spread=1.14
+INVARIANT conv valid_pgs=3509184 sum_line_vpc=3509184 rmap_mapped=3509184 OK
+INVARIANT conv free_pgs=18446744073709551615 usable=3577741 live_frac_of_raw=0.8367

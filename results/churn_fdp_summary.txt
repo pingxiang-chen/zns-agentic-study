@@ -1,0 +1,21 @@
+mode=fdp op_frac=0.070 qd=32 zone_luns=0 susp=0 kv_ruhs=1 raw_GiB=16.00 usable_GiB=14.88
+events=27890226 meas_window_s=5439.9 makespan_s=7839.9 turns=6117
+user_wr_pgs=47636216 user_rd_pgs=560426944 gc_copy_pgs=64713758 host_copy_pgs=0 total_run_user_wr_pgs=71634760
+WAF=2.3585
+erases=438912 zone_resets=0 erases_per_user_GB=2249.470
+gc_count=6858 gc_busy_s=258.471 gc_busy_pct=4.751 gc_max_ms=56.840
+user_write_MBps=35.87 user_read_MBps=421.98 turns_per_hour=4048.1
+LAT kv_read_cmd n=17513953 sampled=2189244 mean_us=768.9 p50_us=640 p90_us=1000 p99_us=3816 p999_us=7080 p9999_us=36778 max_us=55540
+LAT kv_write_cmd n=1487985 sampled=1487985 mean_us=3465.7 p50_us=3200 p90_us=3920 p99_us=7880 p999_us=44096 p9999_us=54184 max_us=58136
+LAT memlog_write_cmd n=11418 sampled=11418 mean_us=2144.2 p50_us=200 p90_us=2800 p99_us=39915 p999_us=48202 p9999_us=50799 max_us=55906
+LAT memlog_read_cmd n=22784 sampled=22784 mean_us=1295.3 p50_us=40 p90_us=152 p99_us=44288 p999_us=51665 p9999_us=54307 max_us=54926
+LAT index_write_cmd n=45672 sampled=45672 mean_us=1780.6 p50_us=200 p90_us=491 p99_us=48497 p999_us=53458 p9999_us=54870 max_us=55761
+LAT index_read_cmd n=22784 sampled=22784 mean_us=1772.0 p50_us=40 p90_us=207 p99_us=45532 p999_us=51518 p9999_us=54736 max_us=55004
+LAT resume_burst n=5443 sampled=5443 mean_us=77719.6 p50_us=64760 p90_us=132388 p99_us=258965 p999_us=534246 p9999_us=627680 max_us=842267
+LAT turn_storage_stall n=6117 sampled=6117 mean_us=125857.9 p50_us=88442 p90_us=264040 p99_us=571563 p999_us=836498 p9999_us=996254 max_us=1001482
+LAT ttft_stall_hit_turn n=253 sampled=253 mean_us=11981.3 p50_us=320 p90_us=3470 p99_us=296562 p999_us=374408 p9999_us=374408 max_us=374408
+LAT ttft_stall_miss_turn n=5443 sampled=5443 mean_us=90001.8 p50_us=67200 p90_us=156386 p99_us=459471 p999_us=736624 p9999_us=826534 max_us=846213
+GCDUR n=6858 p50_ms=47.00 p99_ms=56.08 max_ms=56.84
+WEAR erase_max=54 erase_mean=37.82 spread=1.43
+INVARIANT conv valid_pgs=2890272 sum_line_vpc=2890272 rmap_mapped=2890272 OK
+INVARIANT conv free_pgs=1010430 usable=3900702 live_frac_of_raw=0.6891

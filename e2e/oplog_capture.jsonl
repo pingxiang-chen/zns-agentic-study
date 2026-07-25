@@ -1,0 +1,397 @@
+{"op": "INDEX_INIT", "bytes": 16777216, "ts": 0.007816}
+{"op": "SESSION_START", "sid": 0, "task": "plan_trip", "ts": 0.017174}
+{"op": "SESSION_START", "sid": 1, "task": "code_review", "ts": 0.017216}
+{"op": "SESSION_START", "sid": 2, "task": "research", "ts": 0.017243}
+{"op": "SESSION_START", "sid": 3, "task": "budget", "ts": 0.017267}
+{"op": "SESSION_START", "sid": 4, "task": "plan_trip", "ts": 0.017291}
+{"op": "SESSION_START", "sid": 5, "task": "code_review", "ts": 0.017313}
+{"op": "MEM_READ", "sid": 0, "idx_slot": 3155, "bytes_read": 4096, "ms": 0.033, "ts": 0.01736}
+{"op": "SEARCH", "sid": 0, "bytes_read": 134154, "ms": 0.556, "q": "zone", "ts": 0.017942}
+{"op": "ENGINE", "sid": 0, "turn": 0, "kv_bytes_before": 0, "kv_bytes_after": 3260876, "restore_ms": 0.0, "save_ms": 1.2, "wall_ms": 1414.0, "prefill_tok": 126, "prefill_ms": 289.404, "decode_tok": 140, "decode_ms": 1123.35, "n_saved_tok": 265, "kv_written_bytes": 3260876, "ts": 1.695908}
+{"op": "MEM_WRITE", "sid": 0, "log_bytes": 234, "idx_slot": 2690, "ms": 19.287, "ts": 1.715285}
+{"op": "MEM_WRITE", "sid": 0, "log_bytes": 234, "idx_slot": 2690, "ms": 1.569, "ts": 1.716913}
+{"op": "MEM_READ", "sid": 1, "idx_slot": 3514, "bytes_read": 4096, "ms": 0.042, "ts": 1.717057}
+{"op": "SEARCH", "sid": 1, "bytes_read": 134154, "ms": 0.573, "q": "garbage", "ts": 1.71766}
+{"op": "ENGINE", "sid": 1, "turn": 0, "kv_bytes_before": 0, "kv_bytes_after": 2793324, "restore_ms": 0.0, "save_ms": 1.2, "wall_ms": 1307.1, "prefill_tok": 88, "prefill_ms": 221.923, "decode_tok": 140, "decode_ms": 1084.167, "n_saved_tok": 227, "kv_written_bytes": 2793324, "ts": 3.026484}
+{"op": "MEM_WRITE", "sid": 1, "log_bytes": 234, "idx_slot": 856, "ms": 1.674, "ts": 3.028245}
+{"op": "MEM_WRITE", "sid": 1, "log_bytes": 234, "idx_slot": 856, "ms": 0.821, "ts": 3.029103}
+{"op": "MEM_READ", "sid": 2, "idx_slot": 3673, "bytes_read": 4096, "ms": 0.042, "ts": 3.029255}
+{"op": "SEARCH", "sid": 2, "bytes_read": 7663, "ms": 0.034, "q": "memory", "ts": 3.029318}
+{"op": "ENGINE", "sid": 2, "turn": 0, "kv_bytes_before": 0, "kv_bytes_after": 2928668, "restore_ms": 0.0, "save_ms": 1.2, "wall_ms": 1337.9, "prefill_tok": 99, "prefill_ms": 253.546, "decode_tok": 140, "decode_ms": 1083.36, "n_saved_tok": 238, "kv_written_bytes": 2928668, "ts": 4.368838}
+{"op": "MEM_WRITE", "sid": 2, "log_bytes": 234, "idx_slot": 423, "ms": 1.76, "ts": 4.370684}
+{"op": "MEM_WRITE", "sid": 2, "log_bytes": 234, "idx_slot": 423, "ms": 0.83, "ts": 4.371553}
+{"op": "MEM_READ", "sid": 3, "idx_slot": 1039, "bytes_read": 4096, "ms": 0.058, "ts": 4.371741}
+{"op": "SEARCH", "sid": 3, "bytes_read": 94535, "ms": 0.406, "q": "latency", "ts": 4.372179}
+{"op": "ENGINE", "sid": 3, "turn": 0, "kv_bytes_before": 0, "kv_bytes_after": 2781020, "restore_ms": 0.0, "save_ms": 1.2, "wall_ms": 1392.6, "prefill_tok": 87, "prefill_ms": 235.434, "decode_tok": 140, "decode_ms": 1156.236, "n_saved_tok": 226, "kv_written_bytes": 2781020, "ts": 5.766418}
+{"op": "MEM_WRITE", "sid": 3, "log_bytes": 234, "idx_slot": 1878, "ms": 6.444, "ts": 5.772973}
+{"op": "MEM_WRITE", "sid": 3, "log_bytes": 234, "idx_slot": 1878, "ms": 0.618, "ts": 5.773623}
+{"op": "MEM_READ", "sid": 4, "idx_slot": 3358, "bytes_read": 4096, "ms": 0.06, "ts": 5.773806}
+{"op": "SEARCH", "sid": 4, "bytes_read": 134154, "ms": 0.654, "q": "cache", "ts": 5.774971}
+{"op": "ENGINE", "sid": 4, "turn": 0, "kv_bytes_before": 0, "kv_bytes_after": 2879452, "restore_ms": 0.0, "save_ms": 1.4, "wall_ms": 1427.5, "prefill_tok": 95, "prefill_ms": 262.951, "decode_tok": 140, "decode_ms": 1163.546, "n_saved_tok": 234, "kv_written_bytes": 2879452, "ts": 7.204257}
+{"op": "MEM_WRITE", "sid": 4, "log_bytes": 234, "idx_slot": 2419, "ms": 1.813, "ts": 7.20616}
+{"op": "MEM_WRITE", "sid": 4, "log_bytes": 234, "idx_slot": 2419, "ms": 0.904, "ts": 7.207093}
+{"op": "MEM_READ", "sid": 5, "idx_slot": 1909, "bytes_read": 4096, "ms": 0.059, "ts": 7.207278}
+{"op": "SEARCH", "sid": 5, "bytes_read": 7663, "ms": 0.037, "q": "memory", "ts": 7.207349}
+{"op": "ENGINE", "sid": 5, "turn": 0, "kv_bytes_before": 0, "kv_bytes_after": 2916364, "restore_ms": 0.0, "save_ms": 1.6, "wall_ms": 1445.5, "prefill_tok": 98, "prefill_ms": 290.188, "decode_tok": 140, "decode_ms": 1154.169, "n_saved_tok": 237, "kv_written_bytes": 2916364, "ts": 8.65493}
+{"op": "MEM_WRITE", "sid": 5, "log_bytes": 234, "idx_slot": 2312, "ms": 1.442, "ts": 8.656485}
+{"op": "MEM_WRITE", "sid": 5, "log_bytes": 234, "idx_slot": 2312, "ms": 0.875, "ts": 8.6574}
+{"op": "MEM_READ", "sid": 0, "idx_slot": 266, "bytes_read": 4564, "ms": 0.071, "ts": 8.657614}
+{"op": "MEM_READ", "sid": 0, "idx_slot": 3705, "bytes_read": 4564, "ms": 0.036, "ts": 8.657668}
+{"op": "SEARCH", "sid": 0, "bytes_read": 134154, "ms": 0.711, "q": "cache", "ts": 8.658412}
+{"op": "ENGINE", "sid": 0, "turn": 1, "kv_bytes_before": 3260876, "kv_bytes_after": 6263052, "restore_ms": 1.0, "save_ms": 3.2, "wall_ms": 2125.0, "prefill_tok": 245, "prefill_ms": 803.621, "decode_tok": 140, "decode_ms": 1319.394, "n_saved_tok": 509, "kv_written_bytes": 6263052, "ts": 10.787651}
+{"op": "CALC", "sid": 0, "ts": 10.78779}
+{"op": "MEM_WRITE", "sid": 0, "log_bytes": 234, "idx_slot": 3839, "ms": 7.394, "ts": 10.795206}
+{"op": "MEM_READ", "sid": 1, "idx_slot": 2023, "bytes_read": 4564, "ms": 0.066, "ts": 10.795409}
+{"op": "MEM_READ", "sid": 1, "idx_slot": 3005, "bytes_read": 4564, "ms": 0.036, "ts": 10.795471}
+{"op": "SEARCH", "sid": 1, "bytes_read": 94535, "ms": 0.479, "q": "latency", "ts": 10.795984}
+{"op": "ENGINE", "sid": 1, "turn": 1, "kv_bytes_before": 2793324, "kv_bytes_after": 5893932, "restore_ms": 1.1, "save_ms": 3.2, "wall_ms": 2325.9, "prefill_tok": 253, "prefill_ms": 992.631, "decode_tok": 140, "decode_ms": 1331.133, "n_saved_tok": 479, "kv_written_bytes": 5893932, "ts": 13.126243}
+{"op": "CALC", "sid": 1, "ts": 13.126401}
+{"op": "MEM_WRITE", "sid": 1, "log_bytes": 234, "idx_slot": 1954, "ms": 7.629, "ts": 13.134056}
+{"op": "MEM_READ", "sid": 2, "idx_slot": 1139, "bytes_read": 4564, "ms": 0.076, "ts": 13.134303}
+{"op": "MEM_READ", "sid": 2, "idx_slot": 2035, "bytes_read": 4564, "ms": 0.04, "ts": 13.134366}
+{"op": "SEARCH", "sid": 2, "bytes_read": 134154, "ms": 0.778, "q": "garbage", "ts": 13.135182}
+{"op": "ENGINE", "sid": 2, "turn": 1, "kv_bytes_before": 2928668, "kv_bytes_after": 5967756, "restore_ms": 1.1, "save_ms": 3.0, "wall_ms": 2202.9, "prefill_tok": 248, "prefill_ms": 865.23, "decode_tok": 140, "decode_ms": 1335.461, "n_saved_tok": 485, "kv_written_bytes": 5967756, "ts": 15.342309}
+{"op": "CALC", "sid": 2, "ts": 15.342486}
+{"op": "MEM_WRITE", "sid": 2, "log_bytes": 234, "idx_slot": 1006, "ms": 8.126, "ts": 15.350639}
+{"op": "MEM_READ", "sid": 3, "idx_slot": 2957, "bytes_read": 4564, "ms": 0.077, "ts": 15.350883}
+{"op": "MEM_READ", "sid": 3, "idx_slot": 2043, "bytes_read": 4564, "ms": 0.039, "ts": 15.350945}
+{"op": "SEARCH", "sid": 3, "bytes_read": 94535, "ms": 0.532, "q": "latency", "ts": 15.351515}
+{"op": "ENGINE", "sid": 3, "turn": 1, "kv_bytes_before": 2781020, "kv_bytes_after": 5967756, "restore_ms": 1.0, "save_ms": 3.4, "wall_ms": 2336.7, "prefill_tok": 260, "prefill_ms": 943.648, "decode_tok": 140, "decode_ms": 1390.927, "n_saved_tok": 485, "kv_written_bytes": 5967756, "ts": 17.692814}
+{"op": "CALC", "sid": 3, "ts": 17.692975}
+{"op": "MEM_WRITE", "sid": 3, "log_bytes": 235, "idx_slot": 3050, "ms": 5.829, "ts": 17.698833}
+{"op": "MEM_READ", "sid": 4, "idx_slot": 1055, "bytes_read": 4564, "ms": 0.064, "ts": 17.699086}
+{"op": "MEM_READ", "sid": 4, "idx_slot": 387, "bytes_read": 4564, "ms": 0.044, "ts": 17.699155}
+{"op": "SEARCH", "sid": 4, "bytes_read": 134154, "ms": 0.809, "q": "zone", "ts": 17.700008}
+{"op": "ENGINE", "sid": 4, "turn": 1, "kv_bytes_before": 2879452, "kv_bytes_after": 6287660, "restore_ms": 1.3, "save_ms": 3.5, "wall_ms": 2486.4, "prefill_tok": 278, "prefill_ms": 1054.802, "decode_tok": 140, "decode_ms": 1429.198, "n_saved_tok": 511, "kv_written_bytes": 6287660, "ts": 20.191279}
+{"op": "CALC", "sid": 4, "ts": 20.191456}
+{"op": "MEM_WRITE", "sid": 4, "log_bytes": 234, "idx_slot": 4043, "ms": 6.482, "ts": 20.197968}
+{"op": "MEM_READ", "sid": 5, "idx_slot": 2524, "bytes_read": 4564, "ms": 0.082, "ts": 20.198231}
+{"op": "MEM_READ", "sid": 5, "idx_slot": 1657, "bytes_read": 4564, "ms": 0.043, "ts": 20.198299}
+{"op": "SEARCH", "sid": 5, "bytes_read": 134154, "ms": 0.861, "q": "garbage", "ts": 20.199207}
+{"op": "ENGINE", "sid": 5, "turn": 1, "kv_bytes_before": 2916364, "kv_bytes_after": 6004668, "restore_ms": 1.3, "save_ms": 4.7, "wall_ms": 2370.9, "prefill_tok": 252, "prefill_ms": 962.886, "decode_tok": 140, "decode_ms": 1405.509, "n_saved_tok": 488, "kv_written_bytes": 6004668, "ts": 22.576186}
+{"op": "CALC", "sid": 5, "ts": 22.576354}
+{"op": "MEM_WRITE", "sid": 5, "log_bytes": 234, "idx_slot": 2538, "ms": 5.776, "ts": 22.582158}
+{"op": "SEARCH", "sid": 0, "bytes_read": 134154, "ms": 0.884, "q": "flash", "ts": 22.583266}
+{"op": "MEM_READ", "sid": 0, "idx_slot": 1351, "bytes_read": 4798, "ms": 0.06, "ts": 22.583356}
+{"op": "ENGINE", "sid": 0, "turn": 2, "kv_bytes_before": 6263052, "kv_bytes_after": 8711548, "restore_ms": 2.0, "save_ms": 5.1, "wall_ms": 2371.9, "prefill_tok": 200, "prefill_ms": 855.284, "decode_tok": 140, "decode_ms": 1513.846, "n_saved_tok": 708, "kv_written_bytes": 8711548, "ts": 24.962447}
+{"op": "MEM_WRITE", "sid": 0, "log_bytes": 234, "idx_slot": 376, "ms": 8.873, "ts": 24.971472}
+{"op": "MEM_WRITE", "sid": 0, "log_bytes": 234, "idx_slot": 376, "ms": 0.871, "ts": 24.972391}
+{"op": "CALC", "sid": 0, "ts": 24.972467}
+{"op": "SEARCH", "sid": 1, "bytes_read": 134154, "ms": 0.897, "q": "garbage", "ts": 24.973545}
+{"op": "MEM_READ", "sid": 1, "idx_slot": 1460, "bytes_read": 4798, "ms": 0.052, "ts": 24.973625}
+{"op": "ENGINE", "sid": 1, "turn": 2, "kv_bytes_before": 5893932, "kv_bytes_after": 8600812, "restore_ms": 1.9, "save_ms": 5.5, "wall_ms": 2546.2, "prefill_tok": 221, "prefill_ms": 938.185, "decode_tok": 140, "decode_ms": 1605.019, "n_saved_tok": 699, "kv_written_bytes": 8600812, "ts": 27.52732}
+{"op": "MEM_WRITE", "sid": 1, "log_bytes": 234, "idx_slot": 1990, "ms": 8.527, "ts": 27.536029}
+{"op": "MEM_WRITE", "sid": 1, "log_bytes": 234, "idx_slot": 1990, "ms": 1.748, "ts": 27.537811}
+{"op": "CALC", "sid": 1, "ts": 27.537873}
+{"op": "SEARCH", "sid": 2, "bytes_read": 7663, "ms": 0.054, "q": "memory", "ts": 27.538108}
+{"op": "MEM_READ", "sid": 2, "idx_slot": 3311, "bytes_read": 4798, "ms": 0.053, "ts": 27.538182}
+{"op": "ENGINE", "sid": 2, "turn": 2, "kv_bytes_before": 5967756, "kv_bytes_after": 8859196, "restore_ms": 1.7, "save_ms": 5.3, "wall_ms": 2712.9, "prefill_tok": 236, "prefill_ms": 1000.696, "decode_tok": 140, "decode_ms": 1709.185, "n_saved_tok": 720, "kv_written_bytes": 8859196, "ts": 30.258233}
+{"op": "MEM_WRITE", "sid": 2, "log_bytes": 234, "idx_slot": 3379, "ms": 8.443, "ts": 30.266837}
+{"op": "MEM_WRITE", "sid": 2, "log_bytes": 234, "idx_slot": 3379, "ms": 0.819, "ts": 30.267714}
+{"op": "CALC", "sid": 2, "ts": 30.26778}
+{"op": "SEARCH", "sid": 3, "bytes_read": 134154, "ms": 0.686, "q": "cache", "ts": 38.468741}
+{"op": "MEM_READ", "sid": 3, "idx_slot": 990, "bytes_read": 4799, "ms": 0.039, "ts": 38.46884}
+{"op": "ENGINE", "sid": 3, "turn": 2, "kv_bytes_before": 5967756, "kv_bytes_after": 8760764, "restore_ms": 1.5, "save_ms": 5.3, "wall_ms": 2444.6, "prefill_tok": 228, "prefill_ms": 861.48, "decode_tok": 140, "decode_ms": 1580.421, "n_saved_tok": 712, "kv_written_bytes": 8760764, "ts": 41.182692}
+{"op": "MEM_WRITE", "sid": 3, "log_bytes": 234, "idx_slot": 1358, "ms": 9.995, "ts": 41.192853}
+{"op": "MEM_WRITE", "sid": 3, "log_bytes": 234, "idx_slot": 1358, "ms": 1.445, "ts": 41.194349}
+{"op": "CALC", "sid": 3, "ts": 41.19441}
+{"op": "SEARCH", "sid": 4, "bytes_read": 134154, "ms": 0.889, "q": "zone", "ts": 41.195503}
+{"op": "MEM_READ", "sid": 4, "idx_slot": 178, "bytes_read": 4798, "ms": 0.053, "ts": 41.195585}
+{"op": "ENGINE", "sid": 4, "turn": 2, "kv_bytes_before": 6287660, "kv_bytes_after": 9289836, "restore_ms": 1.9, "save_ms": 6.0, "wall_ms": 2755.3, "prefill_tok": 245, "prefill_ms": 1031.594, "decode_tok": 140, "decode_ms": 1720.602, "n_saved_tok": 755, "kv_written_bytes": 9289836, "ts": 43.958892}
+{"op": "MEM_WRITE", "sid": 4, "log_bytes": 234, "idx_slot": 209, "ms": 20.314, "ts": 43.979349}
+{"op": "MEM_WRITE", "sid": 4, "log_bytes": 234, "idx_slot": 209, "ms": 1.027, "ts": 43.980445}
+{"op": "CALC", "sid": 4, "ts": 43.980537}
+{"op": "SEARCH", "sid": 5, "bytes_read": 134154, "ms": 1.13, "q": "cache", "ts": 43.981909}
+{"op": "MEM_READ", "sid": 5, "idx_slot": 2712, "bytes_read": 4798, "ms": 0.072, "ts": 43.982022}
+{"op": "ENGINE", "sid": 5, "turn": 2, "kv_bytes_before": 6004668, "kv_bytes_after": 8760764, "restore_ms": 2.3, "save_ms": 7.1, "wall_ms": 2842.5, "prefill_tok": 225, "prefill_ms": 1081.402, "decode_tok": 140, "decode_ms": 1757.791, "n_saved_tok": 712, "kv_written_bytes": 8760764, "ts": 46.834061}
+{"op": "MEM_WRITE", "sid": 5, "log_bytes": 234, "idx_slot": 2803, "ms": 9.453, "ts": 46.843677}
+{"op": "MEM_WRITE", "sid": 5, "log_bytes": 234, "idx_slot": 2803, "ms": 2.032, "ts": 46.845749}
+{"op": "CALC", "sid": 5, "ts": 46.845814}
+{"op": "MEM_READ", "sid": 0, "idx_slot": 2369, "bytes_read": 5266, "ms": 0.067, "ts": 46.846065}
+{"op": "SEARCH", "sid": 0, "bytes_read": 134154, "ms": 1.053, "q": "garbage", "ts": 46.847176}
+{"op": "MEM_READ", "sid": 0, "idx_slot": 634, "bytes_read": 5266, "ms": 0.052, "ts": 46.847255}
+{"op": "ENGINE", "sid": 0, "turn": 3, "kv_bytes_before": 8711548, "kv_bytes_after": 11762940, "restore_ms": 2.6, "save_ms": 8.3, "wall_ms": 3049.1, "prefill_tok": 249, "prefill_ms": 1248.478, "decode_tok": 140, "decode_ms": 1796.924, "n_saved_tok": 956, "kv_written_bytes": 11762940, "ts": 49.907413}
+{"op": "MEM_WRITE", "sid": 0, "log_bytes": 235, "idx_slot": 661, "ms": 16.957, "ts": 49.924537}
+{"op": "MEM_READ", "sid": 1, "idx_slot": 454, "bytes_read": 5266, "ms": 0.097, "ts": 49.924828}
+{"op": "SEARCH", "sid": 1, "bytes_read": 134154, "ms": 1.05, "q": "flash", "ts": 49.925931}
+{"op": "MEM_READ", "sid": 1, "idx_slot": 3168, "bytes_read": 5266, "ms": 0.053, "ts": 49.926013}
+{"op": "ENGINE", "sid": 1, "turn": 3, "kv_bytes_before": 8600812, "kv_bytes_after": 11319996, "restore_ms": 3.2, "save_ms": 7.6, "wall_ms": 2701.8, "prefill_tok": 188, "prefill_ms": 936.019, "decode_tok": 140, "decode_ms": 1761.659, "n_saved_tok": 920, "kv_written_bytes": 11319996, "ts": 52.638669}
+{"op": "MEM_WRITE", "sid": 1, "log_bytes": 235, "idx_slot": 355, "ms": 19.848, "ts": 52.658668}
+{"op": "MEM_READ", "sid": 2, "idx_slot": 2340, "bytes_read": 5266, "ms": 0.08, "ts": 52.658975}
+{"op": "SEARCH", "sid": 2, "bytes_read": 134154, "ms": 1.053, "q": "flash", "ts": 52.660084}
+{"op": "MEM_READ", "sid": 2, "idx_slot": 277, "bytes_read": 5266, "ms": 0.053, "ts": 52.660167}
+{"op": "ENGINE", "sid": 2, "turn": 3, "kv_bytes_before": 8859196, "kv_bytes_after": 11836764, "restore_ms": 2.4, "save_ms": 7.6, "wall_ms": 3085.0, "prefill_tok": 243, "prefill_ms": 1220.778, "decode_tok": 140, "decode_ms": 1860.178, "n_saved_tok": 962, "kv_written_bytes": 11836764, "ts": 55.755313}
+{"op": "MEM_WRITE", "sid": 2, "log_bytes": 234, "idx_slot": 647, "ms": 15.652, "ts": 55.771136}
+{"op": "MEM_READ", "sid": 3, "idx_slot": 1864, "bytes_read": 5267, "ms": 0.102, "ts": 55.77147}
+{"op": "SEARCH", "sid": 3, "bytes_read": 134154, "ms": 1.05, "q": "flash", "ts": 55.77258}
+{"op": "MEM_READ", "sid": 3, "idx_slot": 1522, "bytes_read": 5267, "ms": 0.054, "ts": 55.772665}
+{"op": "ENGINE", "sid": 3, "turn": 3, "kv_bytes_before": 8760764, "kv_bytes_after": 11627596, "restore_ms": 2.4, "save_ms": 7.4, "wall_ms": 2860.2, "prefill_tok": 204, "prefill_ms": 1053.642, "decode_tok": 140, "decode_ms": 1802.546, "n_saved_tok": 945, "kv_written_bytes": 11627596, "ts": 58.642778}
+{"op": "MEM_WRITE", "sid": 3, "log_bytes": 234, "idx_slot": 1226, "ms": 14.992, "ts": 58.65792}
+{"op": "MEM_READ", "sid": 4, "idx_slot": 4009, "bytes_read": 5266, "ms": 0.075, "ts": 58.658201}
+{"op": "SEARCH", "sid": 4, "bytes_read": 7663, "ms": 0.055, "q": "memory", "ts": 58.658312}
+{"op": "MEM_READ", "sid": 4, "idx_slot": 1100, "bytes_read": 5266, "ms": 0.05, "ts": 58.658386}
+{"op": "ENGINE", "sid": 4, "turn": 3, "kv_bytes_before": 9289836, "kv_bytes_after": 12476572, "restore_ms": 2.9, "save_ms": 8.7, "wall_ms": 3299.0, "prefill_tok": 260, "prefill_ms": 1341.683, "decode_tok": 140, "decode_ms": 1953.293, "n_saved_tok": 1014, "kv_written_bytes": 12476572, "ts": 61.969097}
+{"op": "MEM_WRITE", "sid": 4, "log_bytes": 234, "idx_slot": 2620, "ms": 13.09, "ts": 61.982421}
+{"op": "MEM_READ", "sid": 5, "idx_slot": 2233, "bytes_read": 5266, "ms": 0.081, "ts": 61.982733}
+{"op": "SEARCH", "sid": 5, "bytes_read": 134154, "ms": 1.039, "q": "flash", "ts": 61.983829}
+{"op": "MEM_READ", "sid": 5, "idx_slot": 1802, "bytes_read": 5266, "ms": 0.053, "ts": 61.983912}
+{"op": "ENGINE", "sid": 5, "turn": 3, "kv_bytes_before": 8760764, "kv_bytes_after": 11639900, "restore_ms": 3.0, "save_ms": 7.1, "wall_ms": 3009.2, "prefill_tok": 235, "prefill_ms": 1163.872, "decode_tok": 140, "decode_ms": 1841.541, "n_saved_tok": 946, "kv_written_bytes": 11639900, "ts": 65.003365}
+{"op": "MEM_WRITE", "sid": 5, "log_bytes": 234, "idx_slot": 173, "ms": 17.793, "ts": 65.021343}
+{"op": "SEARCH", "sid": 0, "bytes_read": 134154, "ms": 1.067, "q": "cache", "ts": 65.022687}
+{"op": "ENGINE", "sid": 0, "turn": 4, "kv_bytes_before": 11762940, "kv_bytes_after": 14137612, "restore_ms": 3.7, "save_ms": 9.3, "wall_ms": 2968.8, "prefill_tok": 194, "prefill_ms": 1041.564, "decode_tok": 140, "decode_ms": 1922.814, "n_saved_tok": 1149, "kv_written_bytes": 14137612, "ts": 68.004591}
+{"op": "CALC", "sid": 0, "ts": 68.004785}
+{"op": "MEM_WRITE", "sid": 0, "log_bytes": 235, "idx_slot": 339, "ms": 21.386, "ts": 68.026207}
+{"op": "MEM_WRITE", "sid": 0, "log_bytes": 235, "idx_slot": 339, "ms": 0.881, "ts": 68.027145}
+{"op": "SEARCH", "sid": 1, "bytes_read": 94535, "ms": 0.738, "q": "latency", "ts": 68.028103}
+{"op": "ENGINE", "sid": 1, "turn": 4, "kv_bytes_before": 11319996, "kv_bytes_after": 13596236, "restore_ms": 3.5, "save_ms": 9.0, "wall_ms": 2882.1, "prefill_tok": 186, "prefill_ms": 955.848, "decode_tok": 140, "decode_ms": 1921.586, "n_saved_tok": 1105, "kv_written_bytes": 13596236, "ts": 70.922874}
+{"op": "CALC", "sid": 1, "ts": 70.923059}
+{"op": "MEM_WRITE", "sid": 1, "log_bytes": 234, "idx_slot": 4056, "ms": 11.7, "ts": 70.934796}
+{"op": "MEM_WRITE", "sid": 1, "log_bytes": 234, "idx_slot": 4056, "ms": 2.005, "ts": 70.936854}
+{"op": "SEARCH", "sid": 2, "bytes_read": 134154, "ms": 1.09, "q": "cache", "ts": 70.938165}
+{"op": "ENGINE", "sid": 2, "turn": 4, "kv_bytes_before": 11836764, "kv_bytes_after": 14199132, "restore_ms": 3.3, "save_ms": 9.6, "wall_ms": 2971.0, "prefill_tok": 193, "prefill_ms": 1044.424, "decode_tok": 140, "decode_ms": 1921.977, "n_saved_tok": 1154, "kv_written_bytes": 14199132, "ts": 73.922186}
+{"op": "CALC", "sid": 2, "ts": 73.922398}
+{"op": "MEM_WRITE", "sid": 2, "log_bytes": 234, "idx_slot": 2027, "ms": 12.546, "ts": 73.935}
+{"op": "MEM_WRITE", "sid": 2, "log_bytes": 234, "idx_slot": 2027, "ms": 0.94, "ts": 73.935998}
+{"op": "SEARCH", "sid": 3, "bytes_read": 7663, "ms": 0.062, "q": "memory", "ts": 73.93628}
+{"op": "ENGINE", "sid": 3, "turn": 4, "kv_bytes_before": 11627596, "kv_bytes_after": 14026876, "restore_ms": 3.0, "save_ms": 8.1, "wall_ms": 3027.6, "prefill_tok": 196, "prefill_ms": 1066.333, "decode_tok": 140, "decode_ms": 1956.646, "n_saved_tok": 1140, "kv_written_bytes": 14026876, "ts": 76.975079}
+{"op": "CALC", "sid": 3, "ts": 76.975291}
+{"op": "MEM_WRITE", "sid": 3, "log_bytes": 234, "idx_slot": 191, "ms": 11.729, "ts": 76.987056}
+{"op": "MEM_WRITE", "sid": 3, "log_bytes": 234, "idx_slot": 191, "ms": 0.794, "ts": 76.987912}
+{"op": "SEARCH", "sid": 4, "bytes_read": 134154, "ms": 0.583, "q": "garbage", "ts": 130.390977}
+{"op": "ENGINE", "sid": 4, "turn": 4, "kv_bytes_before": 12476572, "kv_bytes_after": 14752812, "restore_ms": 2.6, "save_ms": 5.8, "wall_ms": 2011.8, "prefill_tok": 186, "prefill_ms": 533.485, "decode_tok": 140, "decode_ms": 1475.307, "n_saved_tok": 1199, "kv_written_bytes": 14752812, "ts": 132.663726}
+{"op": "CALC", "sid": 4, "ts": 132.663847}
+{"op": "MEM_WRITE", "sid": 4, "log_bytes": 234, "idx_slot": 2481, "ms": 18.544, "ts": 132.682412}
+{"op": "MEM_WRITE", "sid": 4, "log_bytes": 234, "idx_slot": 2481, "ms": 0.587, "ts": 132.683043}
+{"op": "SEARCH", "sid": 5, "bytes_read": 134154, "ms": 0.598, "q": "flash", "ts": 132.683777}
+{"op": "ENGINE", "sid": 5, "turn": 4, "kv_bytes_before": 11639900, "kv_bytes_after": 13620844, "restore_ms": 2.3, "save_ms": 5.8, "wall_ms": 2011.8, "prefill_tok": 162, "prefill_ms": 512.641, "decode_tok": 140, "decode_ms": 1496.201, "n_saved_tok": 1107, "kv_written_bytes": 13620844, "ts": 134.703765}
+{"op": "CALC", "sid": 5, "ts": 134.703885}
+{"op": "MEM_WRITE", "sid": 5, "log_bytes": 234, "idx_slot": 3052, "ms": 12.632, "ts": 134.716537}
+{"op": "MEM_WRITE", "sid": 5, "log_bytes": 234, "idx_slot": 3052, "ms": 1.879, "ts": 134.718439}
+{"op": "MEM_READ", "sid": 0, "idx_slot": 4075, "bytes_read": 5971, "ms": 0.046, "ts": 134.718614}
+{"op": "MEM_READ", "sid": 0, "idx_slot": 1994, "bytes_read": 5971, "ms": 0.03, "ts": 134.71866}
+{"op": "ENGINE", "sid": 0, "turn": 5, "kv_bytes_before": 14137612, "kv_bytes_after": 16819884, "restore_ms": 2.7, "save_ms": 7.4, "wall_ms": 2423.0, "prefill_tok": 219, "prefill_ms": 779.696, "decode_tok": 140, "decode_ms": 1640.034, "n_saved_tok": 1367, "kv_written_bytes": 16819884, "ts": 137.151922}
+{"op": "MEM_WRITE", "sid": 0, "log_bytes": 235, "idx_slot": 1064, "ms": 14.689, "ts": 137.166723}
+{"op": "SESSION_END", "sid": 0, "kv_bytes": 16819884, "turns": 6, "ts": 137.166767}
+{"op": "SESSION_START", "sid": 6, "task": "research", "ts": 137.167736}
+{"op": "MEM_READ", "sid": 2, "idx_slot": 2739, "bytes_read": 5968, "ms": 0.054, "ts": 137.167914}
+{"op": "MEM_READ", "sid": 2, "idx_slot": 1688, "bytes_read": 5968, "ms": 0.033, "ts": 137.167964}
+{"op": "ENGINE", "sid": 2, "turn": 5, "kv_bytes_before": 14199132, "kv_bytes_after": 17065964, "restore_ms": 2.6, "save_ms": 8.2, "wall_ms": 2579.3, "prefill_tok": 234, "prefill_ms": 867.538, "decode_tok": 140, "decode_ms": 1708.063, "n_saved_tok": 1387, "kv_written_bytes": 17065964, "ts": 139.758147}
+{"op": "MEM_WRITE", "sid": 2, "log_bytes": 234, "idx_slot": 3522, "ms": 15.675, "ts": 139.773934}
+{"op": "SESSION_END", "sid": 2, "kv_bytes": 17065964, "turns": 6, "ts": 139.773992}
+{"op": "SESSION_START", "sid": 7, "task": "budget", "ts": 139.775021}
+{"op": "MEM_READ", "sid": 4, "idx_slot": 3803, "bytes_read": 5968, "ms": 0.054, "ts": 139.775199}
+{"op": "MEM_READ", "sid": 4, "idx_slot": 357, "bytes_read": 5968, "ms": 0.035, "ts": 139.775252}
+{"op": "ENGINE", "sid": 4, "turn": 5, "kv_bytes_before": 14752812, "kv_bytes_after": 17447388, "restore_ms": 3.3, "save_ms": 8.5, "wall_ms": 2658.3, "prefill_tok": 220, "prefill_ms": 884.664, "decode_tok": 140, "decode_ms": 1769.702, "n_saved_tok": 1418, "kv_written_bytes": 17447388, "ts": 142.445479}
+{"op": "MEM_WRITE", "sid": 4, "log_bytes": 234, "idx_slot": 1750, "ms": 23.058, "ts": 142.468651}
+{"op": "SESSION_END", "sid": 4, "kv_bytes": 17447388, "turns": 6, "ts": 142.468702}
+{"op": "SESSION_START", "sid": 8, "task": "plan_trip", "ts": 142.469932}
+{"op": "MEM_READ", "sid": 6, "idx_slot": 1424, "bytes_read": 4096, "ms": 0.05, "ts": 142.470123}
+{"op": "SEARCH", "sid": 6, "bytes_read": 94535, "ms": 0.564, "q": "latency", "ts": 142.470725}
+{"op": "ENGINE", "sid": 6, "turn": 0, "kv_bytes_before": 0, "kv_bytes_after": 2805628, "restore_ms": 0.0, "save_ms": 1.5, "wall_ms": 1419.0, "prefill_tok": 89, "prefill_ms": 272.688, "decode_tok": 140, "decode_ms": 1145.209, "n_saved_tok": 228, "kv_written_bytes": 2805628, "ts": 143.891952}
+{"op": "MEM_WRITE", "sid": 6, "log_bytes": 234, "idx_slot": 1656, "ms": 5.518, "ts": 143.897574}
+{"op": "MEM_WRITE", "sid": 6, "log_bytes": 234, "idx_slot": 1656, "ms": 0.805, "ts": 143.898411}
+{"op": "MEM_READ", "sid": 7, "idx_slot": 2641, "bytes_read": 4096, "ms": 0.052, "ts": 143.898642}
+{"op": "SEARCH", "sid": 7, "bytes_read": 134154, "ms": 0.823, "q": "garbage", "ts": 143.899505}
+{"op": "ENGINE", "sid": 7, "turn": 0, "kv_bytes_before": 0, "kv_bytes_after": 2781020, "restore_ms": 0.0, "save_ms": 1.9, "wall_ms": 1444.3, "prefill_tok": 87, "prefill_ms": 274.861, "decode_tok": 140, "decode_ms": 1168.304, "n_saved_tok": 226, "kv_written_bytes": 2781020, "ts": 145.346114}
+{"op": "MEM_WRITE", "sid": 7, "log_bytes": 234, "idx_slot": 546, "ms": 1.532, "ts": 145.347758}
+{"op": "MEM_WRITE", "sid": 7, "log_bytes": 234, "idx_slot": 546, "ms": 0.661, "ts": 145.348463}
+{"op": "MEM_READ", "sid": 8, "idx_slot": 2895, "bytes_read": 4096, "ms": 0.079, "ts": 145.348729}
+{"op": "SEARCH", "sid": 8, "bytes_read": 7663, "ms": 0.05, "q": "memory", "ts": 145.348825}
+{"op": "ENGINE", "sid": 8, "turn": 0, "kv_bytes_before": 0, "kv_bytes_after": 2990188, "restore_ms": 0.0, "save_ms": 1.8, "wall_ms": 1549.2, "prefill_tok": 104, "prefill_ms": 349.842, "decode_tok": 140, "decode_ms": 1198.151, "n_saved_tok": 243, "kv_written_bytes": 2990188, "ts": 146.900374}
+{"op": "MEM_WRITE", "sid": 8, "log_bytes": 234, "idx_slot": 1165, "ms": 1.364, "ts": 146.901858}
+{"op": "MEM_WRITE", "sid": 8, "log_bytes": 234, "idx_slot": 1165, "ms": 0.88, "ts": 146.902781}
+{"op": "MEM_READ", "sid": 1, "idx_slot": 2637, "bytes_read": 5969, "ms": 0.086, "ts": 146.90305}
+{"op": "MEM_READ", "sid": 1, "idx_slot": 385, "bytes_read": 5969, "ms": 0.044, "ts": 146.903117}
+{"op": "ENGINE", "sid": 1, "turn": 5, "kv_bytes_before": 13596236, "kv_bytes_after": 16253900, "restore_ms": 3.1, "save_ms": 9.6, "wall_ms": 2751.6, "prefill_tok": 217, "prefill_ms": 970.413, "decode_tok": 140, "decode_ms": 1776.831, "n_saved_tok": 1321, "kv_written_bytes": 16253900, "ts": 149.667482}
+{"op": "MEM_WRITE", "sid": 1, "log_bytes": 234, "idx_slot": 2322, "ms": 33.36, "ts": 149.70099}
+{"op": "SESSION_END", "sid": 1, "kv_bytes": 16253900, "turns": 6, "ts": 149.701031}
+{"op": "SESSION_START", "sid": 9, "task": "code_review", "ts": 149.702367}
+{"op": "MEM_READ", "sid": 5, "idx_slot": 564, "bytes_read": 5968, "ms": 0.079, "ts": 149.702623}
+{"op": "MEM_READ", "sid": 5, "idx_slot": 1396, "bytes_read": 5968, "ms": 0.04, "ts": 149.702682}
+{"op": "ENGINE", "sid": 5, "turn": 5, "kv_bytes_before": 13620844, "kv_bytes_after": 16327724, "restore_ms": 3.3, "save_ms": 9.6, "wall_ms": 2865.3, "prefill_tok": 221, "prefill_ms": 977.042, "decode_tok": 140, "decode_ms": 1883.969, "n_saved_tok": 1327, "kv_written_bytes": 16327724, "ts": 152.580898}
+{"op": "MEM_WRITE", "sid": 5, "log_bytes": 234, "idx_slot": 2775, "ms": 19.605, "ts": 152.600621}
+{"op": "SESSION_END", "sid": 5, "kv_bytes": 16327724, "turns": 6, "ts": 152.600661}
+{"op": "SESSION_START", "sid": 10, "task": "research", "ts": 152.601978}
+{"op": "MEM_READ", "sid": 7, "idx_slot": 773, "bytes_read": 4564, "ms": 0.077, "ts": 152.602213}
+{"op": "MEM_READ", "sid": 7, "idx_slot": 2914, "bytes_read": 4564, "ms": 0.037, "ts": 152.602268}
+{"op": "SEARCH", "sid": 7, "bytes_read": 134154, "ms": 0.842, "q": "cache", "ts": 152.603147}
+{"op": "ENGINE", "sid": 7, "turn": 1, "kv_bytes_before": 2781020, "kv_bytes_after": 5893932, "restore_ms": 1.5, "save_ms": 4.0, "wall_ms": 2254.1, "prefill_tok": 254, "prefill_ms": 908.658, "decode_tok": 140, "decode_ms": 1343.289, "n_saved_tok": 479, "kv_written_bytes": 5893932, "ts": 154.862912}
+{"op": "CALC", "sid": 7, "ts": 154.863053}
+{"op": "MEM_WRITE", "sid": 7, "log_bytes": 234, "idx_slot": 2123, "ms": 8.66, "ts": 154.871739}
+{"op": "MEM_READ", "sid": 8, "idx_slot": 1922, "bytes_read": 4564, "ms": 0.06, "ts": 154.872007}
+{"op": "MEM_READ", "sid": 8, "idx_slot": 3263, "bytes_read": 4564, "ms": 0.038, "ts": 154.872068}
+{"op": "SEARCH", "sid": 8, "bytes_read": 134154, "ms": 0.749, "q": "zone", "ts": 154.872856}
+{"op": "ENGINE", "sid": 8, "turn": 1, "kv_bytes_before": 2990188, "kv_bytes_after": 6533740, "restore_ms": 1.4, "save_ms": 4.3, "wall_ms": 2488.7, "prefill_tok": 289, "prefill_ms": 1080.653, "decode_tok": 140, "decode_ms": 1405.796, "n_saved_tok": 531, "kv_written_bytes": 6533740, "ts": 157.367297}
+{"op": "CALC", "sid": 8, "ts": 157.367461}
+{"op": "MEM_WRITE", "sid": 8, "log_bytes": 234, "idx_slot": 3708, "ms": 11.63, "ts": 157.379121}
+{"op": "MEM_READ", "sid": 9, "idx_slot": 2817, "bytes_read": 4096, "ms": 0.068, "ts": 157.379417}
+{"op": "SEARCH", "sid": 9, "bytes_read": 134154, "ms": 0.902, "q": "garbage", "ts": 157.380388}
+{"op": "ENGINE", "sid": 9, "turn": 0, "kv_bytes_before": 0, "kv_bytes_after": 2793324, "restore_ms": 0.0, "save_ms": 1.8, "wall_ms": 1556.7, "prefill_tok": 88, "prefill_ms": 307.717, "decode_tok": 140, "decode_ms": 1247.664, "n_saved_tok": 227, "kv_written_bytes": 2793324, "ts": 158.939621}
+{"op": "MEM_WRITE", "sid": 9, "log_bytes": 234, "idx_slot": 906, "ms": 2.225, "ts": 158.94197}
+{"op": "MEM_WRITE", "sid": 9, "log_bytes": 234, "idx_slot": 906, "ms": 0.85, "ts": 158.942867}
+{"op": "MEM_READ", "sid": 10, "idx_slot": 2443, "bytes_read": 4096, "ms": 0.067, "ts": 158.943157}
+{"op": "SEARCH", "sid": 10, "bytes_read": 94535, "ms": 0.756, "q": "latency", "ts": 158.943966}
+{"op": "ENGINE", "sid": 10, "turn": 0, "kv_bytes_before": 0, "kv_bytes_after": 2805628, "restore_ms": 0.0, "save_ms": 1.7, "wall_ms": 1634.3, "prefill_tok": 89, "prefill_ms": 338.835, "decode_tok": 140, "decode_ms": 1294.146, "n_saved_tok": 228, "kv_written_bytes": 2805628, "ts": 160.580632}
+{"op": "MEM_WRITE", "sid": 10, "log_bytes": 235, "idx_slot": 3860, "ms": 2.662, "ts": 160.583404}
+{"op": "MEM_WRITE", "sid": 10, "log_bytes": 235, "idx_slot": 3860, "ms": 0.804, "ts": 160.584253}
+{"op": "MEM_READ", "sid": 3, "idx_slot": 2549, "bytes_read": 5969, "ms": 0.064, "ts": 160.584519}
+{"op": "MEM_READ", "sid": 3, "idx_slot": 831, "bytes_read": 5969, "ms": 0.045, "ts": 160.584586}
+{"op": "ENGINE", "sid": 3, "turn": 5, "kv_bytes_before": 14026876, "kv_bytes_after": 16795276, "restore_ms": 2.8, "save_ms": 8.9, "wall_ms": 3016.6, "prefill_tok": 226, "prefill_ms": 1120.904, "decode_tok": 140, "decode_ms": 1891.166, "n_saved_tok": 1365, "kv_written_bytes": 16795276, "ts": 163.612952}
+{"op": "MEM_WRITE", "sid": 3, "log_bytes": 234, "idx_slot": 1902, "ms": 21.201, "ts": 163.634314}
+{"op": "SESSION_END", "sid": 3, "kv_bytes": 16795276, "turns": 6, "ts": 163.634371}
+{"op": "SESSION_START", "sid": 11, "task": "budget", "ts": 163.635654}
+{"op": "SEARCH", "sid": 7, "bytes_read": 134154, "ms": 0.909, "q": "garbage", "ts": 163.636773}
+{"op": "MEM_READ", "sid": 7, "idx_slot": 3647, "bytes_read": 4798, "ms": 0.053, "ts": 163.636854}
+{"op": "ENGINE", "sid": 7, "turn": 2, "kv_bytes_before": 5893932, "kv_bytes_after": 8526988, "restore_ms": 2.3, "save_ms": 5.6, "wall_ms": 2409.0, "prefill_tok": 215, "prefill_ms": 910.673, "decode_tok": 140, "decode_ms": 1495.626, "n_saved_tok": 693, "kv_written_bytes": 8526988, "ts": 166.053887}
+{"op": "MEM_WRITE", "sid": 7, "log_bytes": 234, "idx_slot": 1466, "ms": 12.486, "ts": 166.066503}
+{"op": "MEM_WRITE", "sid": 7, "log_bytes": 234, "idx_slot": 1466, "ms": 0.829, "ts": 166.067366}
+{"op": "CALC", "sid": 7, "ts": 166.067421}
+{"op": "SEARCH", "sid": 8, "bytes_read": 134154, "ms": 0.875, "q": "zone", "ts": 166.068533}
+{"op": "MEM_READ", "sid": 8, "idx_slot": 3466, "bytes_read": 4798, "ms": 0.053, "ts": 166.068613}
+{"op": "ENGINE", "sid": 8, "turn": 2, "kv_bytes_before": 6533740, "kv_bytes_after": 9658956, "restore_ms": 2.3, "save_ms": 6.7, "wall_ms": 2700.7, "prefill_tok": 255, "prefill_ms": 1082.004, "decode_tok": 140, "decode_ms": 1615.885, "n_saved_tok": 785, "kv_written_bytes": 9658956, "ts": 168.778456}
+{"op": "MEM_WRITE", "sid": 8, "log_bytes": 234, "idx_slot": 1141, "ms": 12.165, "ts": 168.79077}
+{"op": "MEM_WRITE", "sid": 8, "log_bytes": 234, "idx_slot": 1141, "ms": 0.67, "ts": 168.791486}
+{"op": "CALC", "sid": 8, "ts": 168.791541}
+{"op": "MEM_READ", "sid": 9, "idx_slot": 925, "bytes_read": 4564, "ms": 0.048, "ts": 175.467379}
+{"op": "MEM_READ", "sid": 9, "idx_slot": 3065, "bytes_read": 4564, "ms": 0.039, "ts": 175.467458}
+{"op": "SEARCH", "sid": 9, "bytes_read": 94535, "ms": 0.439, "q": "latency", "ts": 175.46793}
+{"op": "ENGINE", "sid": 9, "turn": 1, "kv_bytes_before": 2793324, "kv_bytes_after": 5869324, "restore_ms": 1.1, "save_ms": 3.3, "wall_ms": 2189.6, "prefill_tok": 251, "prefill_ms": 811.534, "decode_tok": 140, "decode_ms": 1375.761, "n_saved_tok": 477, "kv_written_bytes": 5869324, "ts": 177.924165}
+{"op": "CALC", "sid": 9, "ts": 177.924324}
+{"op": "MEM_WRITE", "sid": 9, "log_bytes": 234, "idx_slot": 3250, "ms": 10.775, "ts": 177.935128}
+{"op": "MEM_READ", "sid": 10, "idx_slot": 2269, "bytes_read": 4566, "ms": 0.078, "ts": 177.935419}
+{"op": "MEM_READ", "sid": 10, "idx_slot": 1218, "bytes_read": 4566, "ms": 0.039, "ts": 177.935499}
+{"op": "SEARCH", "sid": 10, "bytes_read": 134154, "ms": 0.844, "q": "cache", "ts": 177.936381}
+{"op": "ENGINE", "sid": 10, "turn": 1, "kv_bytes_before": 2805628, "kv_bytes_after": 5820108, "restore_ms": 1.3, "save_ms": 3.5, "wall_ms": 2339.3, "prefill_tok": 246, "prefill_ms": 917.267, "decode_tok": 140, "decode_ms": 1419.835, "n_saved_tok": 473, "kv_written_bytes": 5820108, "ts": 180.280559}
+{"op": "CALC", "sid": 10, "ts": 180.280731}
+{"op": "MEM_WRITE", "sid": 10, "log_bytes": 235, "idx_slot": 3238, "ms": 7.989, "ts": 180.288748}
+{"op": "MEM_READ", "sid": 11, "idx_slot": 306, "bytes_read": 4096, "ms": 0.08, "ts": 180.289048}
+{"op": "SEARCH", "sid": 11, "bytes_read": 134154, "ms": 0.83, "q": "zone", "ts": 180.289926}
+{"op": "ENGINE", "sid": 11, "turn": 0, "kv_bytes_before": 0, "kv_bytes_after": 3174748, "restore_ms": 0.0, "save_ms": 1.7, "wall_ms": 1844.9, "prefill_tok": 119, "prefill_ms": 445.229, "decode_tok": 140, "decode_ms": 1398.425, "n_saved_tok": 258, "kv_written_bytes": 3174748, "ts": 182.137266}
+{"op": "MEM_WRITE", "sid": 11, "log_bytes": 235, "idx_slot": 1625, "ms": 4.598, "ts": 182.141981}
+{"op": "MEM_WRITE", "sid": 11, "log_bytes": 235, "idx_slot": 1625, "ms": 0.871, "ts": 182.142892}
+{"op": "MEM_READ", "sid": 6, "idx_slot": 2724, "bytes_read": 4564, "ms": 0.087, "ts": 182.143181}
+{"op": "MEM_READ", "sid": 6, "idx_slot": 2225, "bytes_read": 4564, "ms": 0.043, "ts": 182.143246}
+{"op": "SEARCH", "sid": 6, "bytes_read": 7663, "ms": 0.047, "q": "memory", "ts": 182.143333}
+{"op": "ENGINE", "sid": 6, "turn": 1, "kv_bytes_before": 2805628, "kv_bytes_after": 6029276, "restore_ms": 1.2, "save_ms": 3.9, "wall_ms": 2633.5, "prefill_tok": 263, "prefill_ms": 1048.474, "decode_tok": 140, "decode_ms": 1582.595, "n_saved_tok": 490, "kv_written_bytes": 6029276, "ts": 184.782002}
+{"op": "CALC", "sid": 6, "ts": 184.78219}
+{"op": "MEM_WRITE", "sid": 6, "log_bytes": 234, "idx_slot": 5, "ms": 15.476, "ts": 184.797696}
+{"op": "MEM_READ", "sid": 7, "idx_slot": 1966, "bytes_read": 5266, "ms": 0.095, "ts": 184.798026}
+{"op": "SEARCH", "sid": 7, "bytes_read": 94535, "ms": 0.728, "q": "latency", "ts": 184.798807}
+{"op": "MEM_READ", "sid": 7, "idx_slot": 2083, "bytes_read": 5266, "ms": 0.051, "ts": 184.798886}
+{"op": "ENGINE", "sid": 7, "turn": 3, "kv_bytes_before": 8526988, "kv_bytes_after": 11639900, "restore_ms": 3.8, "save_ms": 7.6, "wall_ms": 2871.0, "prefill_tok": 254, "prefill_ms": 1118.987, "decode_tok": 140, "decode_ms": 1748.001, "n_saved_tok": 946, "kv_written_bytes": 11639900, "ts": 187.681342}
+{"op": "MEM_WRITE", "sid": 7, "log_bytes": 234, "idx_slot": 2319, "ms": 16.349, "ts": 187.697876}
+{"op": "MEM_READ", "sid": 8, "idx_slot": 3808, "bytes_read": 5266, "ms": 0.078, "ts": 187.698206}
+{"op": "SEARCH", "sid": 8, "bytes_read": 7663, "ms": 0.055, "q": "memory", "ts": 187.698318}
+{"op": "MEM_READ", "sid": 8, "idx_slot": 1347, "bytes_read": 5266, "ms": 0.05, "ts": 187.698393}
+{"op": "ENGINE", "sid": 8, "turn": 3, "kv_bytes_before": 9658956, "kv_bytes_after": 12981036, "restore_ms": 3.2, "save_ms": 9.0, "wall_ms": 3187.8, "prefill_tok": 271, "prefill_ms": 1267.306, "decode_tok": 140, "decode_ms": 1916.482, "n_saved_tok": 1055, "kv_written_bytes": 12981036, "ts": 190.898587}
+{"op": "MEM_WRITE", "sid": 8, "log_bytes": 234, "idx_slot": 1587, "ms": 13.941, "ts": 190.912688}
+{"op": "SEARCH", "sid": 9, "bytes_read": 7663, "ms": 0.062, "q": "memory", "ts": 190.913049}
+{"op": "MEM_READ", "sid": 9, "idx_slot": 650, "bytes_read": 4798, "ms": 0.065, "ts": 190.913145}
+{"op": "ENGINE", "sid": 9, "turn": 2, "kv_bytes_before": 5869324, "kv_bytes_after": 8637724, "restore_ms": 2.0, "save_ms": 4.9, "wall_ms": 2552.5, "prefill_tok": 226, "prefill_ms": 962.241, "decode_tok": 140, "decode_ms": 1587.125, "n_saved_tok": 702, "kv_written_bytes": 8637724, "ts": 193.47266}
+{"op": "MEM_WRITE", "sid": 9, "log_bytes": 234, "idx_slot": 1312, "ms": 8.744, "ts": 193.481534}
+{"op": "MEM_WRITE", "sid": 9, "log_bytes": 234, "idx_slot": 1312, "ms": 2.844, "ts": 193.484443}
+{"op": "CALC", "sid": 9, "ts": 193.484508}
+{"op": "SEARCH", "sid": 10, "bytes_read": 134154, "ms": 0.946, "q": "flash", "ts": 193.485715}
+{"op": "MEM_READ", "sid": 10, "idx_slot": 4056, "bytes_read": 4801, "ms": 0.054, "ts": 193.4858}
+{"op": "ENGINE", "sid": 10, "turn": 2, "kv_bytes_before": 5820108, "kv_bytes_after": 8305516, "restore_ms": 1.8, "save_ms": 6.0, "wall_ms": 2404.2, "prefill_tok": 203, "prefill_ms": 872.709, "decode_tok": 140, "decode_ms": 1528.636, "n_saved_tok": 675, "kv_written_bytes": 8305516, "ts": 195.897845}
+{"op": "MEM_WRITE", "sid": 10, "log_bytes": 235, "idx_slot": 2627, "ms": 8.877, "ts": 195.906868}
+{"op": "MEM_WRITE", "sid": 10, "log_bytes": 235, "idx_slot": 2627, "ms": 1.18, "ts": 195.908098}
+{"op": "CALC", "sid": 10, "ts": 195.90818}
+{"op": "MEM_READ", "sid": 11, "idx_slot": 3445, "bytes_read": 4566, "ms": 0.087, "ts": 195.908494}
+{"op": "MEM_READ", "sid": 11, "idx_slot": 2461, "bytes_read": 4566, "ms": 0.049, "ts": 195.90857}
+{"op": "SEARCH", "sid": 11, "bytes_read": 134154, "ms": 0.964, "q": "zone", "ts": 195.909604}
+{"op": "ENGINE", "sid": 11, "turn": 1, "kv_bytes_before": 3174748, "kv_bytes_after": 6816732, "restore_ms": 1.3, "save_ms": 4.2, "wall_ms": 2746.2, "prefill_tok": 297, "prefill_ms": 1191.367, "decode_tok": 140, "decode_ms": 1552.337, "n_saved_tok": 554, "kv_written_bytes": 6816732, "ts": 198.661529}
+{"op": "CALC", "sid": 11, "ts": 198.661709}
+{"op": "MEM_WRITE", "sid": 11, "log_bytes": 235, "idx_slot": 3405, "ms": 10.311, "ts": 198.672053}
+{"op": "SEARCH", "sid": 6, "bytes_read": 134154, "ms": 1.002, "q": "zone", "ts": 198.673347}
+{"op": "MEM_READ", "sid": 6, "idx_slot": 2336, "bytes_read": 4798, "ms": 0.076, "ts": 198.673455}
+{"op": "ENGINE", "sid": 6, "turn": 2, "kv_bytes_before": 6029276, "kv_bytes_after": 9092972, "restore_ms": 2.0, "save_ms": 5.5, "wall_ms": 2743.2, "prefill_tok": 250, "prefill_ms": 1109.127, "decode_tok": 140, "decode_ms": 1630.919, "n_saved_tok": 739, "kv_written_bytes": 9092972, "ts": 201.424262}
+{"op": "MEM_WRITE", "sid": 6, "log_bytes": 234, "idx_slot": 53, "ms": 10.483, "ts": 201.434886}
+{"op": "MEM_WRITE", "sid": 6, "log_bytes": 234, "idx_slot": 53, "ms": 0.961, "ts": 201.435905}
+{"op": "CALC", "sid": 6, "ts": 201.435971}
+{"op": "SEARCH", "sid": 7, "bytes_read": 134154, "ms": 1.048, "q": "garbage", "ts": 201.437293}
+{"op": "ENGINE", "sid": 7, "turn": 4, "kv_bytes_before": 11639900, "kv_bytes_after": 13977660, "restore_ms": 3.6, "save_ms": 8.8, "wall_ms": 2894.5, "prefill_tok": 191, "prefill_ms": 925.02, "decode_tok": 140, "decode_ms": 1964.875, "n_saved_tok": 1136, "kv_written_bytes": 13977660, "ts": 204.344368}
+{"op": "CALC", "sid": 7, "ts": 204.344594}
+{"op": "MEM_WRITE", "sid": 7, "log_bytes": 234, "idx_slot": 1418, "ms": 14.126, "ts": 204.358755}
+{"op": "MEM_WRITE", "sid": 7, "log_bytes": 234, "idx_slot": 1418, "ms": 2.981, "ts": 204.361794}
+{"op": "SEARCH", "sid": 8, "bytes_read": 134154, "ms": 1.078, "q": "flash", "ts": 204.363148}
+{"op": "ENGINE", "sid": 8, "turn": 4, "kv_bytes_before": 12981036, "kv_bytes_after": 15048108, "restore_ms": 4.3, "save_ms": 9.9, "wall_ms": 2835.4, "prefill_tok": 169, "prefill_ms": 828.115, "decode_tok": 140, "decode_ms": 2002.659, "n_saved_tok": 1223, "kv_written_bytes": 15048108, "ts": 207.212909}
+{"op": "CALC", "sid": 8, "ts": 207.21316}
+{"op": "MEM_WRITE", "sid": 8, "log_bytes": 234, "idx_slot": 1096, "ms": 14.369, "ts": 207.227561}
+{"op": "MEM_WRITE", "sid": 8, "log_bytes": 234, "idx_slot": 1096, "ms": 0.849, "ts": 207.228447}
+{"op": "MEM_READ", "sid": 9, "idx_slot": 2451, "bytes_read": 5266, "ms": 0.082, "ts": 207.228733}
+{"op": "SEARCH", "sid": 9, "bytes_read": 134154, "ms": 0.916, "q": "flash", "ts": 207.229695}
+{"op": "MEM_READ", "sid": 9, "idx_slot": 3720, "bytes_read": 5266, "ms": 0.045, "ts": 207.229762}
+{"op": "ENGINE", "sid": 9, "turn": 3, "kv_bytes_before": 8637724, "kv_bytes_after": 11516860, "restore_ms": 2.6, "save_ms": 6.5, "wall_ms": 2812.7, "prefill_tok": 235, "prefill_ms": 1048.712, "decode_tok": 140, "decode_ms": 1760.421, "n_saved_tok": 936, "kv_written_bytes": 11516860, "ts": 210.051664}
+{"op": "MEM_WRITE", "sid": 9, "log_bytes": 234, "idx_slot": 1223, "ms": 17.236, "ts": 210.069022}
+{"op": "MEM_READ", "sid": 10, "idx_slot": 2518, "bytes_read": 5271, "ms": 0.086, "ts": 210.069321}
+{"op": "SEARCH", "sid": 10, "bytes_read": 94535, "ms": 0.639, "q": "latency", "ts": 210.07001}
+{"op": "MEM_READ", "sid": 10, "idx_slot": 36, "bytes_read": 5271, "ms": 0.045, "ts": 210.070078}
+{"op": "ENGINE", "sid": 10, "turn": 3, "kv_bytes_before": 8305516, "kv_bytes_after": 11467644, "restore_ms": 2.6, "save_ms": 7.0, "wall_ms": 2897.9, "prefill_tok": 258, "prefill_ms": 1171.262, "decode_tok": 140, "decode_ms": 1723.009, "n_saved_tok": 932, "kv_written_bytes": 11467644, "ts": 212.977618}
+{"op": "MEM_WRITE", "sid": 10, "log_bytes": 235, "idx_slot": 216, "ms": 11.291, "ts": 212.989061}
+{"op": "SEARCH", "sid": 11, "bytes_read": 134154, "ms": 0.609, "q": "flash", "ts": 218.594362}
+{"op": "MEM_READ", "sid": 11, "idx_slot": 3082, "bytes_read": 4801, "ms": 0.047, "ts": 218.594459}
+{"op": "ENGINE", "sid": 11, "turn": 2, "kv_bytes_before": 6816732, "kv_bytes_after": 9203708, "restore_ms": 1.7, "save_ms": 5.1, "wall_ms": 2267.9, "prefill_tok": 195, "prefill_ms": 702.045, "decode_tok": 140, "decode_ms": 1563.311, "n_saved_tok": 748, "kv_written_bytes": 9203708, "ts": 221.126563}
+{"op": "MEM_WRITE", "sid": 11, "log_bytes": 235, "idx_slot": 1359, "ms": 8.786, "ts": 221.135461}
+{"op": "MEM_WRITE", "sid": 11, "log_bytes": 235, "idx_slot": 1359, "ms": 0.751, "ts": 221.136256}
+{"op": "CALC", "sid": 11, "ts": 221.136307}
+{"op": "MEM_READ", "sid": 6, "idx_slot": 725, "bytes_read": 5266, "ms": 0.058, "ts": 221.136571}
+{"op": "SEARCH", "sid": 6, "bytes_read": 134154, "ms": 0.841, "q": "flash", "ts": 221.137455}
+{"op": "MEM_READ", "sid": 6, "idx_slot": 2939, "bytes_read": 5266, "ms": 0.041, "ts": 221.137519}
+{"op": "ENGINE", "sid": 6, "turn": 3, "kv_bytes_before": 9092972, "kv_bytes_after": 12082844, "restore_ms": 2.1, "save_ms": 6.1, "wall_ms": 2790.1, "prefill_tok": 244, "prefill_ms": 1041.227, "decode_tok": 140, "decode_ms": 1745.575, "n_saved_tok": 982, "kv_written_bytes": 12082844, "ts": 223.935978}
+{"op": "MEM_WRITE", "sid": 6, "log_bytes": 234, "idx_slot": 2820, "ms": 16.217, "ts": 223.952339}
+{"op": "MEM_READ", "sid": 7, "idx_slot": 2934, "bytes_read": 5968, "ms": 0.073, "ts": 223.952679}
+{"op": "MEM_READ", "sid": 7, "idx_slot": 2898, "bytes_read": 5968, "ms": 0.044, "ts": 223.952747}
+{"op": "ENGINE", "sid": 7, "turn": 5, "kv_bytes_before": 13977660, "kv_bytes_after": 16721452, "restore_ms": 3.7, "save_ms": 9.5, "wall_ms": 3125.1, "prefill_tok": 224, "prefill_ms": 1144.448, "decode_tok": 140, "decode_ms": 1975.886, "n_saved_tok": 1359, "kv_written_bytes": 16721452, "ts": 227.091152}
+{"op": "MEM_WRITE", "sid": 7, "log_bytes": 234, "idx_slot": 1782, "ms": 15.182, "ts": 227.106473}
+{"op": "SESSION_END", "sid": 7, "kv_bytes": 16721452, "turns": 6, "ts": 227.106516}
+{"op": "SEARCH", "sid": 9, "bytes_read": 94535, "ms": 0.629, "q": "latency", "ts": 227.108771}
+{"op": "ENGINE", "sid": 9, "turn": 4, "kv_bytes_before": 11516860, "kv_bytes_after": 13830012, "restore_ms": 3.0, "save_ms": 8.5, "wall_ms": 2688.3, "prefill_tok": 189, "prefill_ms": 873.051, "decode_tok": 140, "decode_ms": 1811.067, "n_saved_tok": 1124, "kv_written_bytes": 13830012, "ts": 229.808678}
+{"op": "CALC", "sid": 9, "ts": 229.808839}
+{"op": "MEM_WRITE", "sid": 9, "log_bytes": 234, "idx_slot": 2469, "ms": 14.673, "ts": 229.823543}
+{"op": "MEM_WRITE", "sid": 9, "log_bytes": 234, "idx_slot": 2469, "ms": 1.719, "ts": 229.825316}
+{"op": "SEARCH", "sid": 10, "bytes_read": 134154, "ms": 0.913, "q": "flash", "ts": 229.826498}
+{"op": "ENGINE", "sid": 10, "turn": 4, "kv_bytes_before": 11467644, "kv_bytes_after": 13547020, "restore_ms": 3.5, "save_ms": 7.9, "wall_ms": 2613.2, "prefill_tok": 170, "prefill_ms": 798.07, "decode_tok": 140, "decode_ms": 1810.971, "n_saved_tok": 1101, "kv_written_bytes": 13547020, "ts": 232.4513}
+{"op": "CALC", "sid": 10, "ts": 232.451492}
+{"op": "MEM_WRITE", "sid": 10, "log_bytes": 235, "idx_slot": 2575, "ms": 12.994, "ts": 232.464517}
+{"op": "MEM_WRITE", "sid": 10, "log_bytes": 235, "idx_slot": 2575, "ms": 0.82, "ts": 232.465379}
+{"op": "MEM_READ", "sid": 11, "idx_slot": 1285, "bytes_read": 5271, "ms": 0.066, "ts": 232.465665}
+{"op": "SEARCH", "sid": 11, "bytes_read": 134154, "ms": 0.926, "q": "cache", "ts": 232.466643}
+{"op": "MEM_READ", "sid": 11, "idx_slot": 3653, "bytes_read": 5271, "ms": 0.047, "ts": 232.466715}
+{"op": "ENGINE", "sid": 11, "turn": 3, "kv_bytes_before": 9203708, "kv_bytes_after": 12378140, "restore_ms": 2.3, "save_ms": 7.0, "wall_ms": 3020.6, "prefill_tok": 259, "prefill_ms": 1199.197, "decode_tok": 140, "decode_ms": 1817.988, "n_saved_tok": 1006, "kv_written_bytes": 12378140, "ts": 235.496692}
+{"op": "MEM_WRITE", "sid": 11, "log_bytes": 235, "idx_slot": 3963, "ms": 14.44, "ts": 235.511268}
+{"op": "SEARCH", "sid": 6, "bytes_read": 94535, "ms": 0.656, "q": "latency", "ts": 235.512231}
+{"op": "ENGINE", "sid": 6, "turn": 4, "kv_bytes_before": 12082844, "kv_bytes_after": 14432908, "restore_ms": 2.9, "save_ms": 8.9, "wall_ms": 2700.3, "prefill_tok": 192, "prefill_ms": 899.885, "decode_tok": 140, "decode_ms": 1796.238, "n_saved_tok": 1173, "kv_written_bytes": 14432908, "ts": 238.2245}
+{"op": "CALC", "sid": 6, "ts": 238.224657}
+{"op": "MEM_WRITE", "sid": 6, "log_bytes": 234, "idx_slot": 734, "ms": 14.717, "ts": 238.239403}
+{"op": "MEM_WRITE", "sid": 6, "log_bytes": 234, "idx_slot": 734, "ms": 1.091, "ts": 238.240547}
+{"op": "MEM_READ", "sid": 8, "idx_slot": 664, "bytes_read": 5968, "ms": 0.086, "ts": 238.240855}
+{"op": "MEM_READ", "sid": 8, "idx_slot": 2786, "bytes_read": 5968, "ms": 0.045, "ts": 238.240926}
+{"op": "ENGINE", "sid": 8, "turn": 5, "kv_bytes_before": 15048108, "kv_bytes_after": 17754988, "restore_ms": 4.2, "save_ms": 10.0, "wall_ms": 3070.9, "prefill_tok": 221, "prefill_ms": 1114.242, "decode_tok": 140, "decode_ms": 1952.055, "n_saved_tok": 1443, "kv_written_bytes": 17754988, "ts": 241.326145}
+{"op": "MEM_WRITE", "sid": 8, "log_bytes": 234, "idx_slot": 1506, "ms": 16.686, "ts": 241.342971}
+{"op": "SESSION_END", "sid": 8, "kv_bytes": 17754988, "turns": 6, "ts": 241.343026}
+{"op": "SEARCH", "sid": 11, "bytes_read": 7663, "ms": 0.057, "q": "memory", "ts": 241.344815}
+{"op": "ENGINE", "sid": 11, "turn": 4, "kv_bytes_before": 12378140, "kv_bytes_after": 14826636, "restore_ms": 3.3, "save_ms": 8.4, "wall_ms": 2823.3, "prefill_tok": 200, "prefill_ms": 983.465, "decode_tok": 140, "decode_ms": 1835.716, "n_saved_tok": 1205, "kv_written_bytes": 14826636, "ts": 244.179984}
+{"op": "CALC", "sid": 11, "ts": 244.180145}
+{"op": "MEM_WRITE", "sid": 11, "log_bytes": 235, "idx_slot": 1967, "ms": 14.28, "ts": 244.194453}
+{"op": "MEM_WRITE", "sid": 11, "log_bytes": 235, "idx_slot": 1967, "ms": 1.564, "ts": 244.196057}
+{"op": "MEM_READ", "sid": 6, "idx_slot": 3219, "bytes_read": 5968, "ms": 0.069, "ts": 244.196347}
+{"op": "MEM_READ", "sid": 6, "idx_slot": 1230, "bytes_read": 5968, "ms": 0.044, "ts": 244.196418}
+{"op": "ENGINE", "sid": 6, "turn": 5, "kv_bytes_before": 14432908, "kv_bytes_after": 17115180, "restore_ms": 3.8, "save_ms": 11.0, "wall_ms": 2991.2, "prefill_tok": 219, "prefill_ms": 1098.484, "decode_tok": 140, "decode_ms": 1887.981, "n_saved_tok": 1391, "kv_written_bytes": 17115180, "ts": 247.202487}
+{"op": "MEM_WRITE", "sid": 6, "log_bytes": 234, "idx_slot": 2764, "ms": 16.599, "ts": 247.219221}
+{"op": "SESSION_END", "sid": 6, "kv_bytes": 17115180, "turns": 6, "ts": 247.219275}
+{"op": "MEM_READ", "sid": 9, "idx_slot": 4031, "bytes_read": 5968, "ms": 0.067, "ts": 247.220998}
+{"op": "MEM_READ", "sid": 9, "idx_slot": 1499, "bytes_read": 5968, "ms": 0.043, "ts": 247.221066}
+{"op": "ENGINE", "sid": 9, "turn": 5, "kv_bytes_before": 13830012, "kv_bytes_after": 16450764, "restore_ms": 3.9, "save_ms": 10.1, "wall_ms": 2972.1, "prefill_tok": 214, "prefill_ms": 1059.5, "decode_tok": 140, "decode_ms": 1907.912, "n_saved_tok": 1337, "kv_written_bytes": 16450764, "ts": 250.207263}
+{"op": "MEM_WRITE", "sid": 9, "log_bytes": 234, "idx_slot": 2387, "ms": 17.715, "ts": 250.225106}
+{"op": "SESSION_END", "sid": 9, "kv_bytes": 16450764, "turns": 6, "ts": 250.22518}
+{"op": "MEM_READ", "sid": 10, "idx_slot": 1535, "bytes_read": 5976, "ms": 0.074, "ts": 250.226843}
+{"op": "MEM_READ", "sid": 10, "idx_slot": 2963, "bytes_read": 5976, "ms": 0.044, "ts": 250.226915}
+{"op": "ENGINE", "sid": 10, "turn": 5, "kv_bytes_before": 13547020, "kv_bytes_after": 16352332, "restore_ms": 3.7, "save_ms": 9.5, "wall_ms": 3020.2, "prefill_tok": 229, "prefill_ms": 1114.125, "decode_tok": 140, "decode_ms": 1901.346, "n_saved_tok": 1329, "kv_written_bytes": 16352332, "ts": 253.260518}
+{"op": "MEM_WRITE", "sid": 10, "log_bytes": 235, "idx_slot": 3883, "ms": 15.798, "ts": 253.276449}
+{"op": "SESSION_END", "sid": 10, "kv_bytes": 16352332, "turns": 6, "ts": 253.276513}
+{"op": "MEM_READ", "sid": 11, "idx_slot": 88, "bytes_read": 5976, "ms": 0.07, "ts": 253.278203}
+{"op": "MEM_READ", "sid": 11, "idx_slot": 3839, "bytes_read": 5976, "ms": 0.046, "ts": 253.278275}
+{"op": "ENGINE", "sid": 11, "turn": 5, "kv_bytes_before": 14826636, "kv_bytes_after": 17619644, "restore_ms": 3.9, "save_ms": 11.7, "wall_ms": 3178.5, "prefill_tok": 228, "prefill_ms": 1134.995, "decode_tok": 140, "decode_ms": 2038.776, "n_saved_tok": 1432, "kv_written_bytes": 17619644, "ts": 256.472505}
+{"op": "MEM_WRITE", "sid": 11, "log_bytes": 235, "idx_slot": 4059, "ms": 18.963, "ts": 256.491602}
+{"op": "SESSION_END", "sid": 11, "kv_bytes": 17619644, "turns": 6, "ts": 256.491648}

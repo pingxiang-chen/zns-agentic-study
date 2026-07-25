@@ -1,0 +1,23 @@
+{
+ "sessions": 391,
+ "usable_pgs": 3607101,
+ "target_pgs": 4689231,
+ "kv_budget_pgs": 4590927,
+ "gpu_pgs": 1441792,
+ "occ_peak": 0.9218638457864086,
+ "occ_avg": 0.8498226954348738,
+ "active_avg": 31.151503469545105,
+ "gpu_hit_rate": 0.056646957848559984,
+ "arrivals": 391,
+ "deaths": 360,
+ "blocked": 1447,
+ "turns": 5243,
+ "miss": 4946,
+ "hit": 297,
+ "kv_wr_pgs": 42233072,
+ "kv_rd_pgs": 472201832,
+ "ml_wr_pgs": 41890,
+ "ml_rd": 20972,
+ "ix_wr": 41944,
+ "ix_rd": 20972
+}

@@ -1,0 +1,21 @@
+mode=fdp op_frac=0.070 qd=32 zone_luns=0 susp=0 kv_ruhs=32 raw_GiB=16.00 usable_GiB=14.88
+events=17221832 meas_window_s=5447.3 makespan_s=7847.3 turns=3932
+user_wr_pgs=30100381 user_rd_pgs=345137960 gc_copy_pgs=10937257 host_copy_pgs=0 total_run_user_wr_pgs=46427534
+WAF=1.3634
+erases=160768 zone_resets=0 erases_per_user_GB=1303.970
+gc_count=2512 gc_busy_s=46.297 gc_busy_pct=0.850 gc_max_ms=56.280
+user_write_MBps=22.63 user_read_MBps=259.52 turns_per_hour=2598.6
+LAT kv_read_cmd n=10785946 sampled=1348243 mean_us=693.1 p50_us=640 p90_us=760 p99_us=1480 p999_us=4440 p9999_us=6960 max_us=52033
+LAT kv_write_cmd n=940238 sampled=940238 mean_us=3174.4 p50_us=3200 p90_us=3400 p99_us=6400 p999_us=9600 p9999_us=48193 max_us=52987
+LAT memlog_write_cmd n=7338 sampled=7338 mean_us=610.8 p50_us=200 p90_us=200 p99_us=15134 p999_us=43423 p9999_us=46628 max_us=46638
+LAT memlog_read_cmd n=14616 sampled=14616 mean_us=188.5 p50_us=40 p90_us=40 p99_us=2934 p999_us=41617 p9999_us=51292 max_us=52060
+LAT index_write_cmd n=29352 sampled=29352 mean_us=346.3 p50_us=200 p90_us=200 p99_us=3197 p999_us=43275 p9999_us=53994 max_us=54845
+LAT index_read_cmd n=14616 sampled=14616 mean_us=314.1 p50_us=40 p90_us=40 p99_us=3156 p999_us=45184 p9999_us=50432 max_us=50689
+LAT resume_burst n=3465 sampled=3465 mean_us=67828.7 p50_us=57920 p90_us=112160 p99_us=245560 p999_us=446870 p9999_us=458533 max_us=458533
+LAT turn_storage_stall n=3932 sampled=3932 mean_us=90686.3 p50_us=72720 p90_us=153000 p99_us=379520 p999_us=600000 p9999_us=856000 max_us=856000
+LAT ttft_stall_hit_turn n=189 sampled=189 mean_us=1405.4 p50_us=320 p90_us=1158 p99_us=24775 p999_us=90777 p9999_us=90777 max_us=90777
+LAT ttft_stall_miss_turn n=3465 sampled=3465 mean_us=69872.3 p50_us=58800 p90_us=115705 p99_us=266200 p999_us=471182 p9999_us=540702 max_us=540702
+GCDUR n=2512 p50_ms=2.00 p99_ms=55.84 max_ms=56.28
+WEAR erase_max=20 erase_mean=13.79 spread=1.45
+INVARIANT conv valid_pgs=2947056 sum_line_vpc=2947056 rmap_mapped=2947056 OK
+INVARIANT conv free_pgs=953646 usable=3900702 live_frac_of_raw=0.7026

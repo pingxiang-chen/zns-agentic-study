@@ -1,0 +1,23 @@
+mode=fdp op_frac=0.070 qd=32 zone_luns=0 susp=0 kv_ruhs=33 raw_GiB=16.00 usable_GiB=14.88
+events=17940260 meas_window_s=5446.6 makespan_s=7846.6 turns=4122
+user_wr_pgs=31872758 user_rd_pgs=362359824 gc_copy_pgs=122048 host_copy_pgs=0 total_run_user_wr_pgs=47738499
+WAF=1.0038
+erases=124992 zone_resets=0 erases_per_user_GB=957.420
+gc_count=1953 gc_busy_s=6.059 gc_busy_pct=0.111 gc_max_ms=22.640
+user_write_MBps=23.97 user_read_MBps=272.51 turns_per_hour=2724.5
+LAT kv_read_cmd n=11324156 sampled=1415519 mean_us=690.5 p50_us=640 p90_us=680 p99_us=1800 p999_us=4000 p9999_us=7040 max_us=9040
+LAT kv_write_cmd n=995617 sampled=995617 mean_us=3194.2 p50_us=3200 p90_us=3840 p99_us=6400 p999_us=9040 p9999_us=10600 max_us=11600
+LAT memlog_write_cmd n=7688 sampled=7688 mean_us=308.1 p50_us=200 p90_us=200 p99_us=3298 p999_us=6440 p9999_us=13644 max_us=16106
+LAT memlog_read_cmd n=15328 sampled=15328 mean_us=97.5 p50_us=40 p90_us=40 p99_us=2815 p999_us=3649 p9999_us=3873 max_us=5766
+LAT index_write_cmd n=30752 sampled=30752 mean_us=280.8 p50_us=200 p90_us=200 p99_us=3160 p999_us=6167 p9999_us=8297 max_us=16307
+LAT index_read_cmd n=15328 sampled=15328 mean_us=96.3 p50_us=40 p90_us=40 p99_us=1466 p999_us=3664 p9999_us=6373 max_us=8244
+LAT resume_burst n=3656 sampled=3656 mean_us=67206.2 p50_us=60200 p90_us=109960 p99_us=180486 p999_us=352725 p9999_us=520229 max_us=520229
+LAT turn_storage_stall n=4122 sampled=4122 mean_us=88713.7 p50_us=75520 p90_us=141036 p99_us=370920 p999_us=619200 p9999_us=746630 max_us=746630
+LAT ttft_stall_hit_turn n=176 sampled=176 mean_us=1143.4 p50_us=320 p90_us=320 p99_us=25026 p999_us=26008 p9999_us=26008 max_us=26008
+LAT ttft_stall_miss_turn n=3656 sampled=3656 mean_us=67963.6 p50_us=61000 p90_us=110880 p99_us=182280 p999_us=362073 p9999_us=535857 max_us=535857
+GCDUR n=1953 p50_ms=2.00 p99_ms=11.12 max_ms=22.64
+RUHPOOL assigns=395 spills=30 spill_frac=0.0706
+STREAMMIX kv=0.901 memlog=0.011 index=0.000 gc_rewrite=0.088 (of 122048 copied)
+WEAR erase_max=16 erase_mean=10.55 spread=1.52
+INVARIANT conv valid_pgs=3005392 sum_line_vpc=3005392 rmap_mapped=3005392 OK
+INVARIANT conv free_pgs=895310 usable=3900702 live_frac_of_raw=0.7165

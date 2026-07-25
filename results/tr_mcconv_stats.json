@@ -1,0 +1,19 @@
+{
+ "trace": "/tmp/w/mooncake/FAST25-release/traces/conversation_trace.jsonl",
+ "duration_s": 3528.0,
+ "budget_blocks": 788,
+ "occ_target": 0.9,
+ "unique_blocks": 5852,
+ "hit_rate": 0.2591404011461318,
+ "write_GiB": 101.0,
+ "read_GiB": 35.328125,
+ "requests": 363,
+ "blk_reads": 2261,
+ "blk_writes": 6464,
+ "blk_rewrites": 612,
+ "evictions": 5678,
+ "hit_blocks": 2261,
+ "miss_new": 5852,
+ "miss_evicted": 612,
+ "cohorts": 1779
+}

@@ -1,0 +1,15 @@
+{
+ "mode": "mobile",
+ "resume": "highhit",
+ "pgtok": 3,
+ "base_sessions": 48,
+ "occ_target": 0.8,
+ "arrivals": 257,
+ "deaths": 257,
+ "blocked": 0,
+ "rounds": 1575,
+ "resumes": 0,
+ "tool_calls": 3150,
+ "clones": 257,
+ "evictions": 77
+}

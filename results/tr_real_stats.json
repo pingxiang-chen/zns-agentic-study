@@ -1,0 +1,12 @@
+{
+ "base_templates": 12,
+ "kv_scale": 8,
+ "sessions": 4854,
+ "occ_peak": 0.8809983433751155,
+ "occ_avg": 0.7471592614265958,
+ "active_avg": 110.04602908828261,
+ "arrivals": 4854,
+ "deaths": 4743,
+ "blocked": 130,
+ "turns": 28859
+}

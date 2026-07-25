@@ -1,0 +1,19 @@
+mode=zns op_frac=0.070 qd=32 zone_luns=64 susp=0 kv_ruhs=1 raw_GiB=16.00 usable_GiB=15.88
+events=24240058 meas_window_s=5464.6 makespan_s=7864.6 turns=23697
+user_wr_pgs=130894256 user_rd_pgs=406069464 gc_copy_pgs=0 host_copy_pgs=0 total_run_user_wr_pgs=186407009
+WAF=1.0000
+erases=649728 zone_resets=10100 erases_per_user_GB=1211.856
+gc_count=0 gc_busy_s=0.000 gc_busy_pct=0.000 gc_max_ms=0.000
+user_write_MBps=98.11 user_read_MBps=304.37 turns_per_hour=15611.3
+LAT kv_read_cmd n=12687386 sampled=1585923 mean_us=747.9 p50_us=640 p90_us=735 p99_us=3840 p999_us=7040 p9999_us=9680 max_us=15360
+LAT kv_write_cmd n=4099018 sampled=4099018 mean_us=3372.3 p50_us=3200 p90_us=5200 p99_us=8360 p999_us=10840 p9999_us=19000 max_us=25000
+LAT memlog_write_cmd n=30483 sampled=30483 mean_us=463.6 p50_us=200 p90_us=814 p99_us=4112 p999_us=7192 p9999_us=10931 max_us=15511
+LAT memlog_read_cmd n=46607 sampled=46607 mean_us=312.7 p50_us=40 p90_us=650 p99_us=3875 p999_us=6845 p9999_us=10113 max_us=14063
+LAT index_write_cmd n=30482 sampled=30482 mean_us=492.0 p50_us=200 p90_us=818 p99_us=4403 p999_us=8371 p9999_us=11656 max_us=19024
+LAT index_read_cmd n=23712 sampled=23712 mean_us=291.3 p50_us=40 p90_us=609 p99_us=3807 p999_us=6780 p9999_us=10518 max_us=14994
+LAT resume_burst n=20311 sampled=20311 mean_us=14966.0 p50_us=14120 p90_us=24558 p99_us=47700 p999_us=70079 p9999_us=104791 max_us=110786
+LAT turn_storage_stall n=23697 sampled=23697 mean_us=34868.1 p50_us=33739 p90_us=48737 p99_us=70563 p999_us=95000 p9999_us=130699 max_us=146709
+LAT ttft_stall_hit_turn n=9 sampled=9 mean_us=1262.2 p50_us=160 p90_us=3305 p99_us=6453 p999_us=6453 p9999_us=6453 max_us=6453
+LAT ttft_stall_miss_turn n=20311 sampled=20311 mean_us=15879.5 p50_us=14640 p90_us=25772 p99_us=48383 p999_us=70227 p9999_us=104791 max_us=110786
+WEAR erase_max=69 erase_mean=55.57 spread=1.24
+INVARIANT zns zones_in_use=244 free=10 total=256
