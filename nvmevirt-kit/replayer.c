@@ -54,11 +54,10 @@ enum { OP_WKV, OP_RKV, OP_WML, OP_RML, OP_WIX, OP_RIX, OP_DEL };
 
 static double TSCALE = 1.0;
 static int QD = 32, MODE_ZNS = 0, FD = -1;
-static int KSTRIPE = 8;      /* -k: parallel zone chains per KV blob (zns mode).
-                                Each chain is written strictly sequentially
-                                (write-pointer safe); K chains in parallel
-                                recover the stripe bandwidth that one QD1
-                                zone stream cannot exploit (ZenFS-style). */
+static int KSTRIPE = 8;      /* -k: shared/global KV zone streams (zns mode).
+                                Each stream is written strictly sequentially; K
+                                streams can be written in parallel without giving
+                                every live object its own mostly-empty zones. */
 static u64 DEV_PGS, ZONE_PGS, N_ZONES;
 static u64 IX_PGS, ML_PGS, t_end_ns, meas_start_ns;
 
@@ -105,15 +104,19 @@ typedef struct { u64 lpn_start, npgs; } ext_t;
 #define MAXK 16
 typedef struct {
     ext_t *ext; int n_ext, cap_ext; u64 pgs;
-    /* zns: KSTRIPE independent zone chains; chunk j lives on chain j%K at
-       chain-index j/K. Each chain is append-only within its zones. */
-    int *zc[MAXK]; int zc_n[MAXK], zc_cap[MAXK]; u64 zc_wp[MAXK]; /* pages in chain's last zone */
-    u64 chunks;                                    /* 128 KiB chunks written */
     pthread_mutex_t mu;
 } obj_t;
 static obj_t *objs; static u64 n_objs;
 static void obj_add_ext(obj_t *o, u64 s, u64 n) {
     if (o->n_ext && o->ext[o->n_ext-1].lpn_start + o->ext[o->n_ext-1].npgs == s) { o->ext[o->n_ext-1].npgs += n; o->pgs += n; return; }
+    if (o->n_ext == o->cap_ext) { o->cap_ext = o->cap_ext ? o->cap_ext * 2 : 8; o->ext = realloc(o->ext, o->cap_ext * sizeof(ext_t)); }
+    o->ext[o->n_ext++] = (ext_t){ s, n }; o->pgs += n;
+}
+static void obj_add_zns_ext(obj_t *o, u64 s, u64 n) {
+    int same_zone = o->n_ext && ZONE_PGS &&
+        o->ext[o->n_ext-1].lpn_start + o->ext[o->n_ext-1].npgs == s &&
+        o->ext[o->n_ext-1].lpn_start / ZONE_PGS == s / ZONE_PGS;
+    if (same_zone) { o->ext[o->n_ext-1].npgs += n; o->pgs += n; return; }
     if (o->n_ext == o->cap_ext) { o->cap_ext = o->cap_ext ? o->cap_ext * 2 : 8; o->ext = realloc(o->ext, o->cap_ext * sizeof(ext_t)); }
     o->ext[o->n_ext++] = (ext_t){ s, n }; o->pgs += n;
 }
@@ -140,6 +143,63 @@ static void zns_reset_zone(int z) {
     zfree[zf_tail % N_ZONES] = z; zf_tail++; zf_cnt++;
     pthread_mutex_unlock(&z_mu);
 }
+
+typedef struct { int zone; u64 wp; } kv_stream_t;
+static kv_stream_t kvs[MAXK];
+static u64 *kv_zone_live;
+static uint8_t *kv_zone_current;
+static pthread_mutex_t kv_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static void kv_init_streams(void) {
+    for (int c = 0; c < MAXK; c++) kvs[c] = (kv_stream_t){ .zone = -1, .wp = 0 };
+}
+static void kv_reset_if_free(int z) {
+    if (z >= 0 && !kv_zone_current[z] && kv_zone_live[z] == 0) zns_reset_zone(z);
+}
+static void kv_retire_stream_zone(int c) {
+    int z = kvs[c].zone;
+    if (z >= 0) {
+        kv_zone_current[z] = 0;
+        kvs[c] = (kv_stream_t){ .zone = -1, .wp = 0 };
+        kv_reset_if_free(z);
+    }
+}
+static void kv_open_stream_zone(int c) {
+    kv_retire_stream_zone(c);
+    int z = zns_alloc_zone();
+    kvs[c] = (kv_stream_t){ .zone = z, .wp = 0 };
+    kv_zone_current[z] = 1;
+}
+static u64 kv_alloc_pages(int c, u64 n) {
+    if (n > ZONE_PGS) { fprintf(stderr, "KV write larger than zone\n"); exit(6); }
+    if (kvs[c].zone < 0 || kvs[c].wp + n > ZONE_PGS) kv_open_stream_zone(c);
+    int z = kvs[c].zone;
+    u64 pg = (u64)z * ZONE_PGS + kvs[c].wp;
+    kvs[c].wp += n;
+    kv_zone_live[z] += n;
+    if (kvs[c].wp == ZONE_PGS) {
+        kv_zone_current[z] = 0;
+        kvs[c] = (kv_stream_t){ .zone = -1, .wp = 0 };
+    }
+    return pg;
+}
+static void kv_release_obj(obj_t *o) {
+    for (int i = 0; i < o->n_ext; i++) {
+        u64 pg = o->ext[i].lpn_start, rem = o->ext[i].npgs;
+        while (rem) {
+            int z = (int)(pg / ZONE_PGS);
+            u64 n = ZONE_PGS - (pg % ZONE_PGS);
+            if (n > rem) n = rem;
+            if ((u64)z >= N_ZONES || kv_zone_live[z] < n) {
+                fprintf(stderr, "KV zone live accounting underflow zone %d\n", z);
+                exit(6);
+            }
+            kv_zone_live[z] -= n;
+            kv_reset_if_free(z);
+            pg += n; rem -= n;
+        }
+    }
+}
 /* index LSM + memlog FIFO state (single-threaded via ix/ml mutexes) */
 static int *ix_zone_of, *ix_slot_of, *zn_live; static int *ixz, n_ixz, ix_open = -1, IX_BUDGET_Z;
 static u64 ix_open_wp;
@@ -155,30 +215,62 @@ static void pio(int wr, u64 pg, u64 npg) {          /* synchronous single comman
 }
 /* burst of commands with QD via POSIX AIO; entries: (pg, npg) */
 typedef struct { u64 pg, npg; } io_t;
+static void obj_emit_ios(obj_t *o, u64 off, u64 len, io_t *ios, int *nio) {
+    for (int i = 0; i < o->n_ext && len; i++) {
+        if (off >= o->ext[i].npgs) { off -= o->ext[i].npgs; continue; }
+        u64 ext_off = off;
+        while (ext_off < o->ext[i].npgs && len) {
+            u64 pg = o->ext[i].lpn_start + ext_off;
+            u64 n = o->ext[i].npgs - ext_off;
+            u64 zrem = ZONE_PGS - (pg % ZONE_PGS);
+            if (n > len) n = len;
+            if (n > CMD_PGS) n = CMD_PGS;
+            if (n > zrem) n = zrem;
+            ios[(*nio)++] = (io_t){ pg, n };
+            len -= n;
+            ext_off += n;
+        }
+        off = 0;
+    }
+    if (len) { fprintf(stderr, "obj offset past end\n"); exit(4); }
+}
 static u64 burst(int wr, io_t *ios, int n, int qd, int cls) {
     u64 t0 = now_ns();
     struct aiocb cbs[256]; void *bufs[256];
+    u64 c0s[256]; int idxs[256];
     if (qd > 256) qd = 256;
     int issued = 0, done = 0;
     struct aiocb *live[256]; int nlive = 0;
     while (done < n) {
         while (issued < n && nlive < qd) {
-            struct aiocb *cb = &cbs[issued % 256]; memset(cb, 0, sizeof *cb);
-            if (posix_memalign(&bufs[issued % 256], PGSZ, CMDSZ)) exit(9);
-            cb->aio_fildes = FD; cb->aio_buf = bufs[issued % 256];
+            int slot = issued % 256;
+            struct aiocb *cb = &cbs[slot]; memset(cb, 0, sizeof *cb);
+            if (posix_memalign(&bufs[slot], PGSZ, CMDSZ)) exit(9);
+            cb->aio_fildes = FD; cb->aio_buf = bufs[slot];
             cb->aio_nbytes = ios[issued].npg * PGSZ; cb->aio_offset = ios[issued].pg * PGSZ;
-            u64 c0 = now_ns();
+            c0s[slot] = now_ns(); idxs[slot] = issued;
             if (wr ? aio_write(cb) : aio_read(cb)) { perror("aio"); exit(8); }
-            cb->aio_sigevent.sigev_value.sival_ptr = (void *)(uintptr_t)c0;
             live[nlive++] = cb; issued++;
         }
         const struct aiocb *waitlist[256];
         for (int i = 0; i < nlive; i++) waitlist[i] = live[i];
         aio_suspend(waitlist, nlive, NULL);
         for (int i = 0; i < nlive; i++) {
-            if (aio_error(live[i]) != EINPROGRESS) {
-                aio_return(live[i]);
-                u64 c0 = (u64)(uintptr_t)live[i]->aio_sigevent.sigev_value.sival_ptr;
+            int err = aio_error(live[i]);
+            if (err != EINPROGRESS) {
+                int slot = (int)(live[i] - cbs);
+                int idx = idxs[slot];
+                ssize_t ret = aio_return(live[i]);
+                if (err || ret != (ssize_t)live[i]->aio_nbytes) {
+                    fprintf(stderr, "aio %s failed: idx=%d pg=%" PRIu64 " npg=%" PRIu64
+                            " offset=%lld bytes=%zu err=%d (%s) ret=%zd expected=%zu\n",
+                            wr ? "write" : "read", idx, ios[idx].pg, ios[idx].npg,
+                            (long long)live[i]->aio_offset, live[i]->aio_nbytes,
+                            err, err ? strerror(err) : "short I/O", ret, live[i]->aio_nbytes);
+                    free((void *)live[i]->aio_buf);
+                    exit(8);
+                }
+                u64 c0 = c0s[slot];
                 if (cls >= 0 && in_meas()) lv_add(cls, now_ns() - c0);
                 free((void *)live[i]->aio_buf);
                 live[i] = live[--nlive]; i--; done++;
@@ -281,11 +373,10 @@ static void run_op(op_t *o, u64 *turn_stall) {
             }
             ob->n_ext = 0;
         } else {
-            for (int c = 0; c < KSTRIPE; c++) {
-                for (int i = 0; i < ob->zc_n[c]; i++) zns_reset_zone(ob->zc[c][i]);
-                ob->zc_n[c] = 0; ob->zc_wp[c] = 0;
-            }
-            ob->chunks = 0;
+            pthread_mutex_lock(&kv_mu);
+            kv_release_obj(ob);
+            ob->n_ext = 0;
+            pthread_mutex_unlock(&kv_mu);
         }
         ob->pgs = 0;
         pthread_mutex_unlock(&ob->mu);
@@ -311,41 +402,32 @@ static void run_op(op_t *o, u64 *turn_stall) {
         dur = burst(wr, ios, nio, wr && MODE_ZNS ? 1 : QD, cls);
         (void)t0;
     } else {
-        /* ZNS placement: KV blobs stripe across KSTRIPE zone chains; chunk j
-         * (32-page slot) lives on chain j%K at chain-index j/K. Writes run K
-         * parallel chains, each strictly sequential (write-pointer safe). */
+        /* ZNS placement: KV blobs share K global zone streams. The object ext[]
+         * map keeps reads independent of where each logical chunk was appended. */
         if (o->op == OP_WKV) {
-            u64 nch = (o->len + CMD_PGS - 1) / CMD_PGS;
-            for (u64 j0 = 0; j0 < nch; j0++) {
-                u64 j = ob->chunks + j0;
-                int c = (int)(j % (u64)KSTRIPE);
-                if (!ob->zc_n[c] || ob->zc_wp[c] + CMD_PGS > ZONE_PGS) {
-                    if (ob->zc_n[c] == ob->zc_cap[c]) { ob->zc_cap[c] = ob->zc_cap[c] ? ob->zc_cap[c]*2 : 8; ob->zc[c] = realloc(ob->zc[c], ob->zc_cap[c]*4); }
-                    ob->zc[c][ob->zc_n[c]++] = zns_alloc_zone(); ob->zc_wp[c] = 0;
-                }
-                u64 rem = o->len - j0 * CMD_PGS;
-                u64 n = rem > CMD_PGS ? CMD_PGS : rem;
-                ios[nio++] = (io_t){ (u64)ob->zc[c][ob->zc_n[c]-1] * ZONE_PGS + ob->zc_wp[c], n };
-                ob->zc_wp[c] += CMD_PGS;          /* slot-aligned (pad final chunk) */
+            if (o->off != ob->pgs) {
+                fprintf(stderr, "non-append WKV obj %u off %" PRIu64 " expected %" PRIu64 "\n", o->obj, o->off, ob->pgs);
+                exit(4);
             }
-            ob->chunks += nch; ob->pgs += o->len;
-            cls = C_KVWR;
-            pthread_mutex_unlock(&ob->mu);
-            dur = zns_striped_write(ios, nio, cls);
-            goto acct;
-        } else if (o->op == OP_RKV) {
+            pthread_mutex_lock(&kv_mu);
             for (u64 p = 0; p < o->len; ) {
                 u64 lg = o->off + p;
                 u64 j = lg / CMD_PGS, in = lg % CMD_PGS;
                 int c = (int)(j % (u64)KSTRIPE);
-                u64 q = j / (u64)KSTRIPE;
-                u64 slots_per_zone = ZONE_PGS / CMD_PGS;
-                int zi = (int)(q / slots_per_zone);
-                u64 zoff = (q % slots_per_zone) * CMD_PGS + in;
-                u64 n = o->len - p; if (n > CMD_PGS - in) n = CMD_PGS - in;
-                ios[nio++] = (io_t){ (u64)ob->zc[c][zi] * ZONE_PGS + zoff, n };
+                u64 n = o->len - p;
+                if (n > CMD_PGS - in) n = CMD_PGS - in;
+                u64 pg = kv_alloc_pages(c, n);
+                ios[nio++] = (io_t){ pg, n };
+                obj_add_zns_ext(ob, pg, n);
                 p += n;
             }
+            cls = C_KVWR;
+            dur = zns_striped_write(ios, nio, cls);
+            pthread_mutex_unlock(&kv_mu);
+            pthread_mutex_unlock(&ob->mu);
+            goto acct;
+        } else if (o->op == OP_RKV) {
+            obj_emit_ios(ob, o->off, o->len, ios, &nio);
             cls = C_KVRD;
         } else if (o->op == OP_WML || o->op == OP_RML) {
             pthread_mutex_lock(&ml_mu);
@@ -436,8 +518,11 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "-o")) outp = argv[++i];
         else if (!strcmp(argv[i], "-s")) TSCALE = atof(argv[++i]);
         else if (!strcmp(argv[i], "-q")) QD = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "-k")) { KSTRIPE = atoi(argv[++i]);
-            if (KSTRIPE < 1) KSTRIPE = 1; if (KSTRIPE > MAXK) KSTRIPE = MAXK; }
+        else if (!strcmp(argv[i], "-k")) { 
+            KSTRIPE = atoi(argv[++i]);
+            if (KSTRIPE < 1) KSTRIPE = 1;
+            if (KSTRIPE > MAXK) KSTRIPE = MAXK; 
+        }
     }
     if (!tracef || !dev) { fprintf(stderr, "usage: replayer -t trace -d /dev/nvmeXnY -m conv|zns -o out [-s scale] [-q qd]\n"); return 1; }
     for (int c = 0; c < NCLS; c++) pthread_mutex_init(&LAT[c].mu, NULL);
@@ -467,6 +552,9 @@ int main(int argc, char **argv) {
         zfree = malloc(N_ZONES * 4);
         for (u64 i = 0; i < N_ZONES; i++) zfree[i] = (int)i;
         zf_head = 0; zf_tail = 0; zf_cnt = N_ZONES; zf_tail = N_ZONES;
+        kv_init_streams();
+        kv_zone_live = calloc(N_ZONES, sizeof *kv_zone_live);
+        kv_zone_current = calloc(N_ZONES, sizeof *kv_zone_current);
         ix_zone_of = malloc(IX_PGS * 4); ix_slot_of = malloc(IX_PGS * 4);
         for (u64 i = 0; i < IX_PGS; i++) ix_zone_of[i] = -1;
         zn_live = calloc(N_ZONES, 4);
