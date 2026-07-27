@@ -292,6 +292,7 @@ REPLAYER_COMMAND=(
     -t "$TRACE"
     -d "$DEVICE"
     -m "$MODE"
+    -o "$OUTPUT"
 )
 
 if [[ "$MODE" == "zns" ]]; then

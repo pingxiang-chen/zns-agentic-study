@@ -3,4 +3,6 @@ nvmevirt-kit/*.ko
 nvmevirt-kit/nvmevirt/*
 nvmevirt-kit/build_conv/*
 nvmevirt-kit/build_zns/*
-traces/*
+nvmevirt-kit/*.txt
+nvmevirt-kit/*.csv
+traces/*.txt
