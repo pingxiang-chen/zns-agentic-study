@@ -5,4 +5,5 @@ nvmevirt-kit/build_conv/*
 nvmevirt-kit/build_zns/*
 nvmevirt-kit/*.txt
 nvmevirt-kit/*.csv
+nvmevirt-kit/results/*
 traces/*.txt

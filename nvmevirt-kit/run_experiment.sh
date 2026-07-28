@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+!/usr/bin/env bash
 
 set -euo pipefail
 
@@ -12,7 +12,7 @@ K=""
 MEMORY_START="8G"
 CPU_LIST="0,1"
 DEVICE="/dev/nvme3n1"
-TRACE="../traces/tr_occ90.txt"
+TRACE="../traces/tr_occ90_10.txt"
 SCALE="0.25"
 OUTPUT=""
 LOAD_SIZE=""
@@ -33,9 +33,9 @@ Optional arguments:
   scale=0.25
 
 Examples:
-  $0 mode=zns size=38GiB k=8
-  $0 mode=conv size=38GiB
-  $0 mode=zns size=38GiB k=16 output=out_zns_k16
+  $0 mode=zns size=32GiB k=8
+  $0 mode=conv size=32GiB
+  $0 mode=zns size=32GiB k=16 output=out_zns_k16
 EOF
 }
 
@@ -292,7 +292,6 @@ REPLAYER_COMMAND=(
     -t "$TRACE"
     -d "$DEVICE"
     -m "$MODE"
-    -o "$OUTPUT"
 )
 
 if [[ "$MODE" == "zns" ]]; then
@@ -311,7 +310,7 @@ echo "Running:"
 printf ' %q' "${REPLAYER_COMMAND[@]}"
 echo
 
-"${REPLAYER_COMMAND[@]}"
+"${REPLAYER_COMMAND[@]}" > "${OUTPUT}_log.txt" 2>&1
 
 echo
 

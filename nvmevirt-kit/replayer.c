@@ -47,9 +47,9 @@ typedef uint64_t u64; typedef uint32_t u32;
 #define CMD_PGS (CMDSZ / PGSZ)
 
 static const char *cls_name[] =
- { "kv_read_cmd", "kv_write_cmd", "memlog_write_cmd", "memlog_read_cmd",
+ { "kv_read_cmd", "kv_read_op", "kv_write_cmd", "kv_write_op", "memlog_write_cmd", "memlog_read_cmd",
    "index_write_cmd", "index_read_cmd", "resume_burst", "turn_storage_stall" };
-enum { C_KVRD, C_KVWR, C_MLWR, C_MLRD, C_IXWR, C_IXRD, C_RESUME, C_TURNSTALL, NCLS };
+enum { C_KVRD, C_KVRD_OP, C_KVWR, C_KVWR_OP, C_MLWR, C_MLRD, C_IXWR, C_IXRD, C_RESUME, C_TURNSTALL, NCLS };
 enum { OP_WKV, OP_RKV, OP_WML, OP_RML, OP_WIX, OP_RIX, OP_DEL };
 
 static double TSCALE = 1.0;
@@ -75,7 +75,6 @@ static void lv_add(int c, u64 ns) {
 }
 static u64 now_ns(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return ts.tv_sec * 1000000000ULL + ts.tv_nsec; }
 static u64 T0;
-static int in_meas(void) { return (double)(now_ns() - T0) >= meas_start_ns * TSCALE; }
 
 /* ---------------- conv extent allocator (mirrors simulator) ---------------- */
 typedef struct fext { u64 start, len; struct fext *next; } fext_t;
@@ -176,24 +175,6 @@ static void obj_emit_ios(obj_t *o, u64 off, u64 len, io_t *ios, int *nio) {
     if (len) { fprintf(stderr, "obj offset past end\n"); exit(4); }
 }
 
-// static void obj_emit_ios(obj_t *o, u64 off, u64 len, io_t *ios, int *nio) {                                                                                                                
-//     for (int i = 0; i < o->n_ext && len; i++) {
-//         if (off >= o->ext[i].npgs){ 
-//             off -= o->ext[i].npgs;
-//             continue;
-//         }
-//         u64 n = o->ext[i].npgs - off;
-
-//         if (n > len) n = len;
-//         if (n > CMD_PGS) n = CMD_PGS;
-
-//         ios[(*nio)++] = (io_t){ o->ext[i].lpn_start + off, n };
-//         len -= n;
-//         off = 0;
-//     }
-//     if (len) { fprintf(stderr, "obj offset past end\n"); exit(4); }                                                                                                                        
-// }
-
 static u64 burst(int wr, io_t *ios, int n, int qd, int cls) {
     u64 t0 = now_ns();
     struct aiocb cbs[256]; void *bufs[256];
@@ -218,7 +199,7 @@ static u64 burst(int wr, io_t *ios, int n, int qd, int cls) {
             if (aio_error(live[i]) != EINPROGRESS) {
                 aio_return(live[i]);
                 u64 c0 = (u64)(uintptr_t)live[i]->aio_sigevent.sigev_value.sival_ptr;
-                if (cls >= 0 && in_meas()) lv_add(cls, now_ns() - c0);
+                if (cls >= 0) lv_add(cls, now_ns() - c0);
                 free((void *)live[i]->aio_buf);
                 live[i] = live[--nlive]; i--; done++;
             }
@@ -273,8 +254,8 @@ static void gap_sleep(u64 gap_ns) {
     if (g) { struct timespec ts = { g / 1000000000ULL, g % 1000000000ULL }; nanosleep(&ts, NULL); }
 }
 
-/* K parallel chain writers; worker w handles ios[w], ios[w+K], ... so each
- * zone chain is written strictly in order while chains proceed in parallel. */
+/* K parallel zone-chain workers; worker w handles ios[w], ios[w+K], ...
+ * so each chain stays ordered while chains proceed in parallel. */
 struct sw_arg { io_t *ios; int nio, w, cls; };
 static void *sw_worker(void *a_) {
     struct sw_arg *a = a_;
@@ -283,7 +264,7 @@ static void *sw_worker(void *a_) {
     for (int i = a->w; i < a->nio; i += KSTRIPE) {
         u64 c0 = now_ns();
         if (pwrite(FD, buf, a->ios[i].npg * PGSZ, a->ios[i].pg * PGSZ) < 0) { perror("zns pwrite"); exit(8); }
-        if (a->cls >= 0 && in_meas()) lv_add(a->cls, now_ns() - c0);
+        if (a->cls >= 0) lv_add(a->cls, now_ns() - c0);
     }
     free(buf);
     return NULL;
@@ -300,7 +281,30 @@ static u64 zns_striped_write(io_t *ios, int nio, int cls) {
     return now_ns() - t0;
 }
 
-static void run_op(op_t *o, u64 *turn_stall) {
+static void *sr_worker(void *a_) {
+    struct sw_arg *a = a_;
+    char *buf; if (posix_memalign((void **)&buf, PGSZ, CMDSZ)) return NULL;
+    for (int i = a->w; i < a->nio; i += KSTRIPE) {
+        u64 c0 = now_ns();
+        if (pread(FD, buf, a->ios[i].npg * PGSZ, a->ios[i].pg * PGSZ) < 0) { perror("zns pread"); exit(8); }
+        if (a->cls >= 0) lv_add(a->cls, now_ns() - c0);
+    }
+    free(buf);
+    return NULL;
+}
+static u64 zns_striped_read(io_t *ios, int nio, int cls) {
+    u64 t0 = now_ns();
+    pthread_t th[MAXK]; struct sw_arg args[MAXK];
+    int k = KSTRIPE < nio ? KSTRIPE : (nio ? nio : 1);
+    for (int w = 0; w < k; w++) {
+        args[w] = (struct sw_arg){ ios, nio, w, cls };
+        pthread_create(&th[w], NULL, sr_worker, &args[w]);
+    }
+    for (int w = 0; w < k; w++) pthread_join(th[w], NULL);
+    return now_ns() - t0;
+}
+
+static void run_op(op_t *o, u64 *turn_stall, int measure) {
     obj_t *ob = &objs[o->obj];
     int wr = (o->op == OP_WKV || o->op == OP_WML || o->op == OP_WIX);
     int cls = -1;
@@ -347,7 +351,7 @@ static void run_op(op_t *o, u64 *turn_stall) {
         cls = (int[]){ C_KVWR, C_KVRD, C_MLWR, C_MLRD, C_IXWR, C_IXRD }[o->op];
         pthread_mutex_unlock(&ob->mu);
         u64 t0 = now_ns();
-        dur = burst(wr, ios, nio, wr && MODE_ZNS ? 1 : QD, cls);
+        dur = burst(wr, ios, nio, QD, measure ? cls : -1);
         (void)t0;
     } else {
         /* ZNS placement: KV blobs stripe across KSTRIPE zone chains; chunk j
@@ -377,11 +381,14 @@ static void run_op(op_t *o, u64 *turn_stall) {
             }
             cls = C_KVWR;
             pthread_mutex_unlock(&ob->mu);
-            dur = zns_striped_write(ios, nio, cls);
+            dur = zns_striped_write(ios, nio, measure ? cls : -1);
             goto acct;
         } else if (o->op == OP_RKV) {
             obj_emit_ios(ob, o->off, o->len, ios, &nio);
             cls = C_KVRD;
+            pthread_mutex_unlock(&ob->mu);
+            dur = zns_striped_read(ios, nio, measure ? cls : -1);
+            goto acct;
         } else if (o->op == OP_WML || o->op == OP_RML) {
             pthread_mutex_lock(&ml_mu);
             for (u64 p = 0; p < o->len; p++) {
@@ -435,28 +442,34 @@ static void run_op(op_t *o, u64 *turn_stall) {
             cls = (o->op == OP_WIX) ? C_IXWR : C_IXRD;
         }
         pthread_mutex_unlock(&ob->mu);
-        dur = burst(wr, ios, nio, wr ? 1 : QD, cls);
+        dur = burst(wr, ios, nio, wr ? 1 : QD, measure ? cls : -1);
     }
 acct:
-    if (o->op == OP_RKV && in_meas()) lv_add(C_RESUME, dur);
-    if (in_meas()) *turn_stall += dur;
+    if (o->op == OP_WKV && measure) lv_add(C_KVWR_OP, dur);
+    if (o->op == OP_RKV && measure) lv_add(C_KVRD_OP, dur);
+    if (o->op == OP_RKV && measure) lv_add(C_RESUME, dur);
+    if (measure) *turn_stall += dur;
     free(ios);
 }
 
 static void *sess_thread(void *arg) {
     sess_t *S = &sess[(uintptr_t)arg];
     sleep_until(S->t0);
-    u64 turn_stall = 0; int turn_open = 0;
+    u64 trace_ns = S->t0;
+    u64 turn_stall = 0; int turn_open = 0, turn_measured = 0;
     for (u32 i = 0; i < S->n; i++) {
         op_t *o = &S->ops[i];
+        trace_ns += o->gap;
+        int measure = trace_ns >= meas_start_ns;
         gap_sleep(o->gap);
         if (o->ts) {
-            if (turn_open && in_meas()) lv_add(C_TURNSTALL, turn_stall);
-            turn_stall = 0; turn_open = 1;
+            if (turn_open && turn_measured) lv_add(C_TURNSTALL, turn_stall);
+            turn_stall = 0; turn_open = 1; turn_measured = 0;
         }
-        run_op(o, &turn_stall);
+        run_op(o, &turn_stall, measure);
+        if (measure) turn_measured = 1;
     }
-    if (turn_open && in_meas()) lv_add(C_TURNSTALL, turn_stall);
+    if (turn_open && turn_measured) lv_add(C_TURNSTALL, turn_stall);
     return NULL;
 }
 
