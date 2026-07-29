@@ -391,19 +391,40 @@ static void run_op(op_t *o, u64 *turn_stall, int measure) {
             goto acct;
         } else if (o->op == OP_WML || o->op == OP_RML) {
             pthread_mutex_lock(&ml_mu);
-            for (u64 p = 0; p < o->len; p++) {
-                u64 lg = (o->off + p) % ML_PGS;
+            for (u64 p = 0; p < o->len; ) {
                 if (o->op == OP_WML) {
                     if (ml_open < 0 || ml_open_wp == ZONE_PGS) {
-                        if (n_mlz >= ml_budget_z) { int oz = mlz[0];
-                            for (u64 q = 0; q < ML_PGS; q++) if (ml_page_zone[q] != UINT64_MAX && (int)(ml_page_zone[q] >> 32) == oz) ml_page_zone[q] = UINT64_MAX;
-                            zns_reset_zone(oz); memmove(mlz, mlz + 1, (--n_mlz) * 4); }
-                        ml_open = zns_alloc_zone(); mlz[n_mlz++] = ml_open; ml_open_wp = 0; }
-                    ml_page_zone[lg] = ((u64)ml_open << 32) | (u32)ml_open_wp;
-                    ios[nio++] = (io_t){ (u64)ml_open * ZONE_PGS + ml_open_wp, 1 }; ml_open_wp++;
+                        if (n_mlz >= ml_budget_z) {
+                            int oz = mlz[0];
+                            for (u64 q = 0; q < ML_PGS; q++){
+                                if (ml_page_zone[q] != UINT64_MAX && (int)(ml_page_zone[q] >> 32) == oz)
+                                    ml_page_zone[q] = UINT64_MAX;
+                            }
+                            zns_reset_zone(oz); memmove(mlz, mlz + 1, (--n_mlz) * 4);
+                        }
+                        ml_open = zns_alloc_zone();
+                        mlz[n_mlz++] = ml_open;
+                        ml_open_wp = 0;
+                    }
+
+                    u64 n = o->len - p;
+                    u64 zrem = ZONE_PGS - ml_open_wp;
+                    if (n > CMD_PGS) n = CMD_PGS;
+                    if (n > zrem) n = zrem;
+
+                    u64 slot = ml_open_wp;
+                    for (u64 q = 0; q < n; q++) {
+                        u64 lg = (o->off + p + q) % ML_PGS;
+                        ml_page_zone[lg] = ((u64)ml_open << 32) | (u32)(slot + q);
+                    }
+                    ios[nio++] = (io_t){ (u64)ml_open * ZONE_PGS + slot, n };
+                    ml_open_wp += n;
+                    p += n;
                 } else {
-                    u64 zs = ml_page_zone[lg]; if (zs == UINT64_MAX) continue;
+                    u64 lg = (o->off + p) % ML_PGS;
+                    u64 zs = ml_page_zone[lg]; if (zs == UINT64_MAX) { p++; continue; }
                     ios[nio++] = (io_t){ (zs >> 32) * ZONE_PGS + (u32)zs, 1 };
+                    p++;
                 }
             }
             pthread_mutex_unlock(&ml_mu);

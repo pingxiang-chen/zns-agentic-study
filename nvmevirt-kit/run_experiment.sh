@@ -1,6 +1,12 @@
-!/usr/bin/env bash
+#!/usr/bin/env bash
 
 set -euo pipefail
+
+# Check if effective user ID is 0
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Error: This script must be run with sudo or as root." >&2
+    exit 1
+fi
 
 # -----------------------------
 # Default configuration
@@ -223,11 +229,11 @@ fi
 echo
 echo "Removing existing nvmev module..."
 
-sudo rmmod nvmev 2>/dev/null || true
+rmmod nvmev 2>/dev/null || true
 
 echo "Loading NVMeVirt..."
 
-sudo ./load.sh \
+./load.sh \
     "$MODE" \
     "$MEMORY_START" \
     "$LOAD_SIZE" \
@@ -279,7 +285,7 @@ fi
 
         echo "Zone count"
         echo "=========="
-        sudo blkzone report "$DEVICE" | wc -l
+        blkzone report "$DEVICE" | wc -l
         echo
     fi
 } | tee "$INFO_FILE"
@@ -288,7 +294,7 @@ fi
 # Run trace replayer
 # -----------------------------
 REPLAYER_COMMAND=(
-    sudo ./replayer
+    ./replayer
     -t "$TRACE"
     -d "$DEVICE"
     -m "$MODE"
@@ -320,3 +326,6 @@ save_block_stats
 echo "Replay completed."
 echo "Device information: $INFO_FILE"
 echo "Replay output:       $OUTPUT"
+
+chown $SUDO_USER:$SUDO_USER *$OUTPUT*.csv
+chown $SUDO_USER:$SUDO_USER *$OUTPUT*.txt
