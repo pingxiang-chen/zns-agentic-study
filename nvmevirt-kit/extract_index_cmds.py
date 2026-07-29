@@ -10,8 +10,8 @@ import sys
 from pathlib import Path
 
 
-COMMANDS = {"index_write_cmd", "index_read_cmd"}
-COMMAND_ORDER = {"index_write_cmd": 0, "index_read_cmd": 1}
+COMMANDS = {"index_write_cmd", "index_read_cmd", "kv_write_op", "kv_read_op"}
+COMMAND_ORDER = {"index_write_cmd": 0, "index_read_cmd": 1, "kv_write_op" :2, "kv_read_op" :3}
 SUMMARY_GLOB = "*_summary.txt"
 
 LATENCY_RE = re.compile(r"^LAT\s+(?P<cmd>\S+)\s+(?P<fields>.+)$")

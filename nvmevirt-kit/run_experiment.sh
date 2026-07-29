@@ -39,9 +39,9 @@ Optional arguments:
   scale=0.25
 
 Examples:
-  $0 mode=zns size=32GiB k=8
-  $0 mode=conv size=32GiB
-  $0 mode=zns size=32GiB k=16 output=out_zns_k16
+    sudo $0 mode=zns size=32GiB k=8
+    sudo $0 mode=conv size=32GiB
+    sudo $0 mode=zns size=32GiB k=16 output=out_zns_k16
 EOF
 }
 

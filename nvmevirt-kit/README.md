@@ -8,11 +8,13 @@ SSD) and ≤3.3 % (ZNS) vs. real devices.
 Target machine: `alex@192.168.1.83` (x86_64 Linux, ≥64 GiB RAM recommended;
 32 GiB works with smaller `memmap`).
 
+It is highly recommended to use the `isolcpus` Linux command-line configuration to avoid schedulers putting tasks on the CPUs that NVMeVirt uses:
+
 ## 1. One-time setup (reserve memory for the virtual devices)
 
 ```bash
 sudo vim /etc/default/grub
-#   GRUB_CMDLINE_LINUX="memmap=48G\\$16G"     # reserve 48 GiB starting at 16 GiB
+# GRUB_CMDLINE_LINUX="memmap=40G\\$8G isolcpus=0,1" // reserve 40 GiB starting at 8 GiB
 sudo update-grub && sudo reboot
 cat /proc/cmdline    # verify memmap is present
 ```
@@ -32,20 +34,36 @@ reservation).
 (`BASE_SSD=WD_ZN540` profile). To match the paper's 7 % OP, `build.sh` also
 patches `ssd_config.h` (`OP_AREA_PERCENT 0.07`) — see the script.
 
-## 3. Run
+
+## 3. Get traces and build the replayer.c
+```bash
+gunzip -k ../traces/tr_occ90.txt.gz
+make replayer
+```
+
+We provide a python3 scripts `keep_log_percentage.py` in `traces` folder that allow users to extract `X%` of the original logs.
+```bash
+python3 keep_log_percentage.py tr_occ90.txt 10%
+```
+
+You can also changed meas_start_ns in generated log to change how long to start the time measurement recording
+
+## 4. Run
+Check `run_experiment.sh` before you launch experiment wrapper scripts.
+
+Some default setting in the experiment wrapper scripts you can change:
+
+`MEMORY_START`, `CPU_LIST` (should be the same as `isolcpus`), `DEVICE`, `SCALE`, `TRACE` 
 
 ```bash
 # conventional target
-sudo ./load.sh conv 16G 48G "0,1"      # memmap_start memmap_size cpus
-lsblk                                   # note the new /dev/nvmeXnY
-make replayer
-gunzip -k ../traces/tr_occ90.txt.gz
-sudo ./replayer -t ../traces/tr_occ90.txt -d /dev/nvmeXnY -m conv -o out_conv -s 0.25
+sudo ./run_experiment.sh mode=conv size=32GiB scale=0.25 trace=../traces/tr_occ90_1.txt
 
-sudo rmmod nvmev
-sudo ./load.sh zns 16G 48G "0,1"
-sudo ./replayer -t ../traces/tr_occ90.txt -d /dev/nvmeXnY -m zns -o out_zns -s 0.25
+# zns target
+sudo ./run_experiment.sh mode=conv size=32GiB k=1 scale=0.25 trace=../traces/tr_occ90_1.txt
 ```
+
+In ZNS mode, the wrapper will automatically added `1MiB` to required size, make sure you reserve memory space a little bit more: [Error: Segmentation fault (core dumped)](https://github.com/snu-csl/nvmevirt/issues/23).
 
 `-s 0.25` replays the 7,800-virtual-second trace 4x faster (~33 min); use
 `-s 1` for full-fidelity think times. The replayer prints the same
@@ -67,9 +85,13 @@ with its Samsung-970Pro timing profile.
   extent allocator + BLKDISCARD in conv mode; zone-per-session +
   BLKRESETZONE + host index compaction in zns mode)
 - `build.sh`, `load.sh` — NVMeVirt build/load helpers
+- `run_experiment.sh` — Single experiments wrapper script
+- `run_exploration.sh` — Multiple experiments script
+- `extract_index_cmds.py` - Python post processing to cosolidate the results 
 - `Makefile` — builds the replayer
 - `../traces/tr_occ90.txt.gz` — the exact trace used in the paper (occ-0.86)
 - `../sim/` — the simulator, to regenerate traces at other occupancies
+
 
 ## Caveats
 
