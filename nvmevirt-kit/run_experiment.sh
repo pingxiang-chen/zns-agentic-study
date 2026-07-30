@@ -316,16 +316,26 @@ echo "Running:"
 printf ' %q' "${REPLAYER_COMMAND[@]}"
 echo
 
+set +e
 "${REPLAYER_COMMAND[@]}" > "${OUTPUT}_log.txt" 2>&1
+REPLAYER_STATUS=$?
+set -e
 
 echo
 
 STAT_FILE="${OUTPUT}_block_stat_after.csv"
 save_block_stats
 
-echo "Replay completed."
+if (( REPLAYER_STATUS == 0 )); then
+    echo "Replay completed."
+else
+    echo "Replay stopped early with status $REPLAYER_STATUS."
+    echo "See ${OUTPUT}_log.txt and ${OUTPUT}_summary.txt."
+fi
 echo "Device information: $INFO_FILE"
 echo "Replay output:       $OUTPUT"
 
 chown $SUDO_USER:$SUDO_USER *$OUTPUT*.csv
 chown $SUDO_USER:$SUDO_USER *$OUTPUT*.txt
+
+exit "$REPLAYER_STATUS"

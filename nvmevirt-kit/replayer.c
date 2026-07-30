@@ -51,6 +51,18 @@ static const char *cls_name[] =
    "index_write_cmd", "index_read_cmd", "resume_burst", "turn_storage_stall" };
 enum { C_KVRD, C_KVRD_OP, C_KVWR, C_KVWR_OP, C_MLWR, C_MLRD, C_IXWR, C_IXRD, C_RESUME, C_TURNSTALL, NCLS };
 enum { OP_WKV, OP_RKV, OP_WML, OP_RML, OP_WIX, OP_RIX, OP_DEL };
+static const char *op_name(uint8_t op) {
+    switch (op) {
+    case OP_WKV: return "WKV";
+    case OP_RKV: return "RKV";
+    case OP_WML: return "WML";
+    case OP_RML: return "RML";
+    case OP_WIX: return "WIX";
+    case OP_RIX: return "RIX";
+    case OP_DEL: return "DEL";
+    default: return "UNKNOWN";
+    }
+}
 
 static double TSCALE = 1.0;
 static int QD = 32, MODE_ZNS = 0, FD = -1;
@@ -124,7 +136,7 @@ static u64 obj_lpn(obj_t *o, u64 off) {
 static int *zfree; static u64 zf_head, zf_tail, zf_cnt; static pthread_mutex_t z_mu = PTHREAD_MUTEX_INITIALIZER;
 static int zns_alloc_zone(void) {
     pthread_mutex_lock(&z_mu);
-    if (!zf_cnt) { fprintf(stderr, "ZNS out of zones\n"); exit(3); }
+    if (!zf_cnt) { pthread_mutex_unlock(&z_mu); return -1; }
     int z = zfree[zf_head % N_ZONES]; zf_head++; zf_cnt--;
     pthread_mutex_unlock(&z_mu);
     return z;
@@ -209,9 +221,70 @@ static u64 burst(int wr, io_t *ios, int n, int qd, int cls) {
 }
 
 /* ---------------- trace ---------------- */
-typedef struct { u64 gap; u32 obj; u64 off, len; uint8_t op, ts; } op_t;
+typedef struct { u64 gap; u32 obj; u64 off, len, line_no; uint8_t op, ts; } op_t;
 typedef struct { op_t *ops; u32 n; u64 t0; } sess_t;
 static sess_t *sess; static u32 n_sess;
+static const char *TRACE_PATH;
+
+typedef struct {
+    int active, code;
+    char reason[64];
+    u32 sid, op_idx, obj;
+    u64 line_no, trace_ns, gap, off, len;
+    uint8_t op;
+} stop_info_t;
+static stop_info_t STOP_INFO;
+static pthread_mutex_t stop_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static int stop_requested(void) {
+    pthread_mutex_lock(&stop_mu);
+    int active = STOP_INFO.active;
+    pthread_mutex_unlock(&stop_mu);
+    return active;
+}
+
+static void request_storage_stop(int code, const char *reason, u32 sid, u32 op_idx, u64 trace_ns, const op_t *op) {
+    int first = 0;
+    pthread_mutex_lock(&stop_mu);
+    if (!STOP_INFO.active) {
+        STOP_INFO.active = 1;
+        STOP_INFO.code = code;
+        snprintf(STOP_INFO.reason, sizeof STOP_INFO.reason, "%s", reason);
+        STOP_INFO.sid = sid;
+        STOP_INFO.op_idx = op_idx;
+        STOP_INFO.trace_ns = trace_ns;
+        if (op) {
+            STOP_INFO.line_no = op->line_no;
+            STOP_INFO.gap = op->gap;
+            STOP_INFO.obj = op->obj;
+            STOP_INFO.off = op->off;
+            STOP_INFO.len = op->len;
+            STOP_INFO.op = op->op;
+        }
+        first = 1;
+    }
+    pthread_mutex_unlock(&stop_mu);
+
+    if (first) {
+        if (op) {
+            fprintf(stderr,
+                    "storage exhausted: %s at %s:%" PRIu64
+                    " session=%u op_index=%u trace_ns=%" PRIu64
+                    " op=%s obj=%u off=%" PRIu64 " len=%" PRIu64 "\n",
+                    reason, TRACE_PATH ? TRACE_PATH : "(unknown trace)", op->line_no,
+                    sid, op_idx, trace_ns, op_name(op->op), op->obj, op->off, op->len);
+        } else {
+            fprintf(stderr, "storage exhausted: %s before trace replay\n", reason);
+        }
+    }
+}
+
+static int stop_code(void) {
+    pthread_mutex_lock(&stop_mu);
+    int code = STOP_INFO.active ? STOP_INFO.code : 0;
+    pthread_mutex_unlock(&stop_mu);
+    return code;
+}
 
 static void load_trace(const char *path) {
     FILE *fp = fopen(path, "r"); if (!fp) { perror("trace"); exit(1); }
@@ -226,7 +299,9 @@ static void load_trace(const char *path) {
     objs = calloc(n_objs + 2, sizeof(obj_t));
     for (u64 i = 0; i < n_objs + 2; i++) pthread_mutex_init(&objs[i].mu, NULL);
     u32 sid = 0; sess_t *cur = NULL; u32 cap = 0;
+    u64 line_no = 0;
     while (fgets(line, sizeof line, fp)) {
+        line_no++;
         if (line[0] == 'A') {
             u64 d, t0; sscanf(line, "A %" SCNu64 " %" SCNu64, &d, &t0);
             cur = &sess[sid++]; cur->t0 = t0; cap = 0;
@@ -236,6 +311,7 @@ static void load_trace(const char *path) {
             if (cur->n == cap) { cap = cap ? cap * 2 : 16; cur->ops = realloc(cur->ops, cap * sizeof(op_t)); }
             op_t *o = &cur->ops[cur->n++];
             o->gap = gap; o->obj = obj; o->off = off; o->len = len; o->ts = ts;
+            o->line_no = line_no;
             o->op = !strcmp(kind,"WKV")?OP_WKV:!strcmp(kind,"RKV")?OP_RKV:!strcmp(kind,"WML")?OP_WML:
                     !strcmp(kind,"RML")?OP_RML:!strcmp(kind,"WIX")?OP_WIX:!strcmp(kind,"RIX")?OP_RIX:OP_DEL;
         }
@@ -244,14 +320,31 @@ static void load_trace(const char *path) {
 }
 
 /* ---------------- per-session execution ---------------- */
-static void sleep_until(u64 target_rel_ns) {
+static int sleep_until(u64 target_rel_ns) {
     u64 t = (u64)((double)target_rel_ns * TSCALE);
-    u64 now = now_ns() - T0;
-    if (t > now) { struct timespec ts = { (t - now) / 1000000000ULL, (t - now) % 1000000000ULL }; nanosleep(&ts, NULL); }
+    for (;;) {
+        if (stop_requested()) return 0;
+        u64 now = now_ns() - T0;
+        if (t <= now) return 1;
+        u64 wait = t - now;
+        if (wait > 100000000ULL) wait = 100000000ULL;
+        struct timespec ts = { wait / 1000000000ULL, wait % 1000000000ULL };
+        nanosleep(&ts, NULL);
+    }
 }
-static void gap_sleep(u64 gap_ns) {
+static int gap_sleep(u64 gap_ns) {
     u64 g = (u64)((double)gap_ns * TSCALE);
-    if (g) { struct timespec ts = { g / 1000000000ULL, g % 1000000000ULL }; nanosleep(&ts, NULL); }
+    u64 end = now_ns() + g;
+    while (g) {
+        if (stop_requested()) return 0;
+        u64 wait = g > 100000000ULL ? 100000000ULL : g;
+        struct timespec ts = { wait / 1000000000ULL, wait % 1000000000ULL };
+        nanosleep(&ts, NULL);
+        u64 now = now_ns();
+        if (now >= end) return 1;
+        g = end - now;
+    }
+    return !stop_requested();
 }
 
 /* K parallel zone-chain workers; worker w handles ios[w], ios[w+K], ...
@@ -304,16 +397,19 @@ static u64 zns_striped_read(io_t *ios, int nio, int cls) {
     return now_ns() - t0;
 }
 
-static void run_op(op_t *o, u64 *turn_stall, int measure) {
+static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u64 trace_ns) {
     obj_t *ob = &objs[o->obj];
     int wr = (o->op == OP_WKV || o->op == OP_WML || o->op == OP_WIX);
     int cls = -1;
     io_t *ios = malloc(sizeof(io_t) * (o->len / CMD_PGS + 2 + o->len));
     int nio = 0;
     u64 dur = 0;
+    int ob_locked = 0, ml_locked = 0, ix_locked = 0;
+
+    if (stop_requested()) { free(ios); return -1; }
 
     if (o->op == OP_DEL) {
-        pthread_mutex_lock(&ob->mu);
+        pthread_mutex_lock(&ob->mu); ob_locked = 1;
         if (!MODE_ZNS) {
             for (int i = 0; i < ob->n_ext; i++) {
                 if (!getenv("BLKDISCARD_DISABLE")) {   /* no-TRIM experiment toggle (Part 2) */
@@ -331,15 +427,24 @@ static void run_op(op_t *o, u64 *turn_stall, int measure) {
             ob->n_ext = 0;
         }
         ob->pgs = 0;
-        pthread_mutex_unlock(&ob->mu);
-        free(ios); return;
+        pthread_mutex_unlock(&ob->mu); ob_locked = 0;
+        free(ios); return 0;
     }
 
-    pthread_mutex_lock(&ob->mu);
+    pthread_mutex_lock(&ob->mu); ob_locked = 1;
     if (!MODE_ZNS) {
         if (wr && o->op == OP_WKV) {                       /* allocate extents for append */
             u64 need = (o->off + o->len > ob->pgs) ? o->off + o->len - ob->pgs : 0;
-            while (need) { u64 got; int64_t s = fs_alloc(need, &got); if (s < 0) { fprintf(stderr, "dev full\n"); exit(5); } obj_add_ext(ob, s, got); need -= got; }
+            while (need) {
+                u64 got = 0;
+                int64_t s = fs_alloc(need, &got);
+                if (s < 0 || !got) {
+                    request_storage_stop(5, "conv_device_full", sid, op_idx, trace_ns, o);
+                    goto fail;
+                }
+                obj_add_ext(ob, s, got);
+                need -= got;
+            }
         }
         u64 base = (o->op == OP_WML || o->op == OP_RML) ? ML_PGS : (o->op == OP_WIX || o->op == OP_RIX) ? IX_PGS : 0;
         for (u64 p = 0; p < o->len; ) {
@@ -349,7 +454,7 @@ static void run_op(op_t *o, u64 *turn_stall, int measure) {
             p += n;
         }
         cls = (int[]){ C_KVWR, C_KVRD, C_MLWR, C_MLRD, C_IXWR, C_IXRD }[o->op];
-        pthread_mutex_unlock(&ob->mu);
+        pthread_mutex_unlock(&ob->mu); ob_locked = 0;
         u64 t0 = now_ns();
         dur = burst(wr, ios, nio, QD, measure ? cls : -1);
         (void)t0;
@@ -371,7 +476,12 @@ static void run_op(op_t *o, u64 *turn_stall, int measure) {
                 if (n > CMD_PGS - in) n = CMD_PGS - in;
                 if (!ob->zc_n[c] || ob->zc_wp[c] + n > ZONE_PGS) {
                     if (ob->zc_n[c] == ob->zc_cap[c]) { ob->zc_cap[c] = ob->zc_cap[c] ? ob->zc_cap[c]*2 : 8; ob->zc[c] = realloc(ob->zc[c], ob->zc_cap[c]*4); }
-                    ob->zc[c][ob->zc_n[c]++] = zns_alloc_zone(); ob->zc_wp[c] = 0;
+                    int z = zns_alloc_zone();
+                    if (z < 0) {
+                        request_storage_stop(3, "zns_out_of_zones", sid, op_idx, trace_ns, o);
+                        goto fail;
+                    }
+                    ob->zc[c][ob->zc_n[c]++] = z; ob->zc_wp[c] = 0;
                 }
                 u64 pg = (u64)ob->zc[c][ob->zc_n[c]-1] * ZONE_PGS + ob->zc_wp[c];
                 ios[nio++] = (io_t){ pg, n };
@@ -380,17 +490,17 @@ static void run_op(op_t *o, u64 *turn_stall, int measure) {
                 p += n;
             }
             cls = C_KVWR;
-            pthread_mutex_unlock(&ob->mu);
+            pthread_mutex_unlock(&ob->mu); ob_locked = 0;
             dur = zns_striped_write(ios, nio, measure ? cls : -1);
             goto acct;
         } else if (o->op == OP_RKV) {
             obj_emit_ios(ob, o->off, o->len, ios, &nio);
             cls = C_KVRD;
-            pthread_mutex_unlock(&ob->mu);
+            pthread_mutex_unlock(&ob->mu); ob_locked = 0;
             dur = zns_striped_read(ios, nio, measure ? cls : -1);
             goto acct;
         } else if (o->op == OP_WML || o->op == OP_RML) {
-            pthread_mutex_lock(&ml_mu);
+            pthread_mutex_lock(&ml_mu); ml_locked = 1;
             for (u64 p = 0; p < o->len; ) {
                 if (o->op == OP_WML) {
                     if (ml_open < 0 || ml_open_wp == ZONE_PGS) {
@@ -403,6 +513,10 @@ static void run_op(op_t *o, u64 *turn_stall, int measure) {
                             zns_reset_zone(oz); memmove(mlz, mlz + 1, (--n_mlz) * 4);
                         }
                         ml_open = zns_alloc_zone();
+                        if (ml_open < 0) {
+                            request_storage_stop(3, "zns_out_of_zones", sid, op_idx, trace_ns, o);
+                            goto fail;
+                        }
                         mlz[n_mlz++] = ml_open;
                         ml_open_wp = 0;
                     }
@@ -427,22 +541,34 @@ static void run_op(op_t *o, u64 *turn_stall, int measure) {
                     p++;
                 }
             }
-            pthread_mutex_unlock(&ml_mu);
+            pthread_mutex_unlock(&ml_mu); ml_locked = 0;
             cls = o->op == OP_WML ? C_MLWR : C_MLRD;
         } else {  /* WIX / RIX */
-            pthread_mutex_lock(&ix_mu);
+            pthread_mutex_lock(&ix_mu); ix_locked = 1;
             for (u64 p = 0; p < o->len; p++) {
                 u64 e = (o->off + p) % IX_PGS;
                 if (o->op == OP_WIX) {
                     if (ix_open < 0 || ix_open_wp == ZONE_PGS) {
-                        ix_open = zns_alloc_zone(); ix_open_wp = 0; ixz[n_ixz++] = ix_open;
+                        ix_open = zns_alloc_zone();
+                        if (ix_open < 0) {
+                            request_storage_stop(3, "zns_out_of_zones", sid, op_idx, trace_ns, o);
+                            goto fail;
+                        }
+                        ix_open_wp = 0; ixz[n_ixz++] = ix_open;
                         if (n_ixz > IX_BUDGET_Z) {         /* compact min-live full zone */
                             int vi = -1, vz = -1, best = 1 << 30;
                             for (int k = 0; k < n_ixz; k++) if (ixz[k] != ix_open && zn_live[ixz[k]] < best) { best = zn_live[ixz[k]]; vz = ixz[k]; vi = k; }
                             if (vz >= 0) {
                                 for (u64 q = 0; q < IX_PGS; q++) if (ix_zone_of[q] == vz) {
                                     pio(0, (u64)vz * ZONE_PGS + ix_slot_of[q], 1);
-                                    if (ix_open_wp == ZONE_PGS) { ix_open = zns_alloc_zone(); ix_open_wp = 0; ixz[n_ixz++] = ix_open; }
+                                    if (ix_open_wp == ZONE_PGS) {
+                                        ix_open = zns_alloc_zone();
+                                        if (ix_open < 0) {
+                                            request_storage_stop(3, "zns_out_of_zones", sid, op_idx, trace_ns, o);
+                                            goto fail;
+                                        }
+                                        ix_open_wp = 0; ixz[n_ixz++] = ix_open;
+                                    }
                                     ix_zone_of[q] = ix_open; ix_slot_of[q] = ix_open_wp; zn_live[ix_open]++;
                                     pio(1, (u64)ix_open * ZONE_PGS + ix_open_wp, 1); ix_open_wp++;
                                 }
@@ -459,10 +585,10 @@ static void run_op(op_t *o, u64 *turn_stall, int measure) {
                     ios[nio++] = (io_t){ (u64)ix_zone_of[e] * ZONE_PGS + ix_slot_of[e], 1 };
                 }
             }
-            pthread_mutex_unlock(&ix_mu);
+            pthread_mutex_unlock(&ix_mu); ix_locked = 0;
             cls = (o->op == OP_WIX) ? C_IXWR : C_IXRD;
         }
-        pthread_mutex_unlock(&ob->mu);
+        pthread_mutex_unlock(&ob->mu); ob_locked = 0;
         dur = burst(wr, ios, nio, wr ? 1 : QD, measure ? cls : -1);
     }
 acct:
@@ -471,23 +597,32 @@ acct:
     if (o->op == OP_RKV && measure) lv_add(C_RESUME, dur);
     if (measure) *turn_stall += dur;
     free(ios);
+    return 0;
+fail:
+    if (ix_locked) pthread_mutex_unlock(&ix_mu);
+    if (ml_locked) pthread_mutex_unlock(&ml_mu);
+    if (ob_locked) pthread_mutex_unlock(&ob->mu);
+    free(ios);
+    return -1;
 }
 
 static void *sess_thread(void *arg) {
     sess_t *S = &sess[(uintptr_t)arg];
-    sleep_until(S->t0);
+    u32 sid = (u32)(uintptr_t)arg;
+    if (!sleep_until(S->t0)) return NULL;
     u64 trace_ns = S->t0;
     u64 turn_stall = 0; int turn_open = 0, turn_measured = 0;
     for (u32 i = 0; i < S->n; i++) {
+        if (stop_requested()) break;
         op_t *o = &S->ops[i];
         trace_ns += o->gap;
         int measure = trace_ns >= meas_start_ns;
-        gap_sleep(o->gap);
+        if (!gap_sleep(o->gap)) break;
         if (o->ts) {
             if (turn_open && turn_measured) lv_add(C_TURNSTALL, turn_stall);
             turn_stall = 0; turn_open = 1; turn_measured = 0;
         }
-        run_op(o, &turn_stall, measure);
+        if (run_op(o, &turn_stall, measure, sid, i, trace_ns) < 0) break;
         if (measure) turn_measured = 1;
     }
     if (turn_open && turn_measured) lv_add(C_TURNSTALL, turn_stall);
@@ -495,6 +630,48 @@ static void *sess_thread(void *arg) {
 }
 
 static int cmp_u32(const void *a, const void *b) { u32 x = *(const u32*)a, y = *(const u32*)b; return x < y ? -1 : x > y; }
+static u32 pct_u32(const lvec *L, double p) { return L->v[(u64)(p / 100.0 * (L->n - 1) + 0.5)]; }
+
+static int write_outputs(const char *outp, const char *dev) {
+    char fn[512];
+    snprintf(fn, sizeof fn, "%s_summary.txt", outp);
+    FILE *out = fopen(fn, "w");
+    if (!out) { perror("summary"); return 1; }
+
+    fprintf(out, "mode=%s tscale=%.3f qd=%d device=%s\n", MODE_ZNS ? "zns" : "conv", TSCALE, QD, dev);
+    pthread_mutex_lock(&stop_mu);
+    if (STOP_INFO.active) {
+        fprintf(out, "RUN_STATUS incomplete reason=%s", STOP_INFO.reason);
+        if (STOP_INFO.line_no) {
+            fprintf(out,
+                    " trace=%s line=%" PRIu64 " session=%u op_index=%u trace_ns=%" PRIu64
+                    " op=%s obj=%u gap=%" PRIu64 " off=%" PRIu64 " len=%" PRIu64,
+                    TRACE_PATH ? TRACE_PATH : "(unknown trace)", STOP_INFO.line_no,
+                    STOP_INFO.sid, STOP_INFO.op_idx, STOP_INFO.trace_ns, op_name(STOP_INFO.op),
+                    STOP_INFO.obj, STOP_INFO.gap, STOP_INFO.off, STOP_INFO.len);
+        }
+        fprintf(out, "\n");
+    } else {
+        fprintf(out, "RUN_STATUS complete\n");
+    }
+    pthread_mutex_unlock(&stop_mu);
+
+    for (int c = 0; c < NCLS; c++) {
+        lvec *L = &LAT[c]; if (!L->n) continue;
+        qsort(L->v, L->n, sizeof *L->v, cmp_u32);
+        double sum = 0; for (u64 i = 0; i < L->n; i++) sum += L->v[i];
+        fprintf(out, "LAT %s n=%" PRIu64 " mean_us=%.1f p50_us=%u p90_us=%u p99_us=%u p999_us=%u max_us=%u\n",
+                cls_name[c], L->n, sum / L->n, pct_u32(L, 50), pct_u32(L, 90), pct_u32(L, 99), pct_u32(L, 99.9), L->v[L->n - 1]);
+        snprintf(fn, sizeof fn, "%s_lat_%s.csv", outp, cls_name[c]);
+        FILE *f2 = fopen(fn, "w");
+        if (!f2) { perror("lat csv"); fclose(out); return 1; }
+        u64 step = L->n > 200000 ? L->n / 200000 : 1;
+        for (u64 i = 0; i < L->n; i += step) fprintf(f2, "%u\n", L->v[i]);
+        fclose(f2);
+    }
+    fclose(out);
+    return 0;
+}
 
 int main(int argc, char **argv) {
     const char *tracef = NULL, *dev = NULL, *outp = "out";
@@ -512,6 +689,7 @@ int main(int argc, char **argv) {
         }
     }
     if (!tracef || !dev) { fprintf(stderr, "usage: replayer -t trace -d /dev/nvmeXnY -m conv|zns -o out [-s scale] [-q qd]\n"); return 1; }
+    TRACE_PATH = tracef;
     for (int c = 0; c < NCLS; c++) pthread_mutex_init(&LAT[c].mu, NULL);
     load_trace(tracef);
 
@@ -523,9 +701,15 @@ int main(int argc, char **argv) {
 
     if (!MODE_ZNS) {
         fs_free(0, DEV_PGS);
-        u64 got; int64_t s = fs_alloc(IX_PGS + ML_PGS, &got);   /* preallocate index+memlog */
-        obj_add_ext(&objs[0], (u64)s, IX_PGS);
-        obj_add_ext(&objs[1], (u64)s + IX_PGS, ML_PGS);
+        u64 got = 0, need = IX_PGS + ML_PGS;
+        int64_t s = fs_alloc(need, &got);   /* preallocate index+memlog */
+        if (s < 0 || got < need) {
+            if (s >= 0 && got) fs_free((u64)s, got);
+            request_storage_stop(5, "conv_metadata_prealloc_full", 0, 0, 0, NULL);
+        } else {
+            obj_add_ext(&objs[0], (u64)s, IX_PGS);
+            obj_add_ext(&objs[1], (u64)s + IX_PGS, ML_PGS);
+        }
     } else {
         u64 zsec = 0;
         char sysp[256], buf[64];
@@ -554,28 +738,20 @@ int main(int argc, char **argv) {
 #endif
     }
 
-    T0 = now_ns();
-    pthread_t *th = malloc(n_sess * sizeof(pthread_t));
-    for (u32 s = 0; s < n_sess; s++) pthread_create(&th[s], NULL, sess_thread, (void *)(uintptr_t)s);
-    for (u32 s = 0; s < n_sess; s++) pthread_join(th[s], NULL);
-
-    char fn[512];
-    snprintf(fn, sizeof fn, "%s_summary.txt", outp); FILE *out = fopen(fn, "w");
-    fprintf(out, "mode=%s tscale=%.3f qd=%d device=%s\n", MODE_ZNS ? "zns" : "conv", TSCALE, QD, dev);
-    for (int c = 0; c < NCLS; c++) {
-        lvec *L = &LAT[c]; if (!L->n) continue;
-        qsort(L->v, L->n, 4, cmp_u32);
-        double sum = 0; for (u64 i = 0; i < L->n; i++) sum += L->v[i];
-        #define PCT(p) L->v[(u64)((p) / 100.0 * (L->n - 1) + 0.5)]
-        fprintf(out, "LAT %s n=%" PRIu64 " mean_us=%.1f p50_us=%u p90_us=%u p99_us=%u p999_us=%u max_us=%u\n",
-                cls_name[c], L->n, sum / L->n, PCT(50), PCT(90), PCT(99), PCT(99.9), L->v[L->n - 1]);
-        snprintf(fn, sizeof fn, "%s_lat_%s.csv", outp, cls_name[c]);
-        FILE *f2 = fopen(fn, "w");
-        u64 step = L->n > 200000 ? L->n / 200000 : 1;
-        for (u64 i = 0; i < L->n; i += step) fprintf(f2, "%u\n", L->v[i]);
-        fclose(f2);
+    if (!stop_requested()) {
+        T0 = now_ns();
+        pthread_t *th = malloc(n_sess * sizeof(pthread_t));
+        for (u32 s = 0; s < n_sess; s++) pthread_create(&th[s], NULL, sess_thread, (void *)(uintptr_t)s);
+        for (u32 s = 0; s < n_sess; s++) pthread_join(th[s], NULL);
+        free(th);
     }
-    fclose(out);
-    fprintf(stderr, "done; summary in %s_summary.txt\n", outp);
-    return 0;
+
+    int write_rc = write_outputs(outp, dev);
+    int rc = stop_code();
+    if (write_rc) return write_rc;
+    if (rc)
+        fprintf(stderr, "stopped; partial summary in %s_summary.txt\n", outp);
+    else
+        fprintf(stderr, "done; summary in %s_summary.txt\n", outp);
+    return rc;
 }
