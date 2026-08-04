@@ -7,3 +7,4 @@ nvmevirt-kit/*.txt
 nvmevirt-kit/*.csv
 nvmevirt-kit/results/*
 traces/*.txt
+results/*
