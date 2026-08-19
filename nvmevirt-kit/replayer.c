@@ -225,6 +225,10 @@ typedef struct { u64 gap; u32 obj; u64 off, len, line_no; uint8_t op, ts; } op_t
 typedef struct { op_t *ops; u32 n; u64 t0; } sess_t;
 static sess_t *sess; static u32 n_sess;
 static const char *TRACE_PATH;
+static u64 RPROG_INTERVAL = 10000;
+static u64 RPROG_TOTAL_OPS, RPROG_TOTAL_LOG_WRITES, RPROG_TOTAL_LOG_PAGES;
+static u64 RPROG_ISSUED_OPS, RPROG_ISSUED_LOG_WRITES, RPROG_ISSUED_LOG_PAGES;
+static pthread_mutex_t rprog_mu = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct {
     int active, code;
@@ -286,6 +290,14 @@ static int stop_code(void) {
     return code;
 }
 
+static int rprog_is_log_write(const op_t *op) {
+    return op && (op->op == OP_WKV || op->op == OP_WML || op->op == OP_WIX);
+}
+
+static u64 rprog_atomic_read_u64(u64 *v) {
+    return __sync_add_and_fetch(v, 0);
+}
+
 static void load_trace(const char *path) {
     FILE *fp = fopen(path, "r"); if (!fp) { perror("trace"); exit(1); }
     char line[256];
@@ -317,6 +329,78 @@ static void load_trace(const char *path) {
         }
     }
     fclose(fp);
+}
+
+static void rprog_count_trace(void) {
+    RPROG_TOTAL_OPS = 0;
+    RPROG_TOTAL_LOG_WRITES = 0;
+    RPROG_TOTAL_LOG_PAGES = 0;
+    for (u32 s = 0; s < n_sess; s++) {
+        RPROG_TOTAL_OPS += sess[s].n;
+        for (u32 i = 0; i < sess[s].n; i++) {
+            op_t *op = &sess[s].ops[i];
+            if (rprog_is_log_write(op)) {
+                RPROG_TOTAL_LOG_WRITES++;
+                RPROG_TOTAL_LOG_PAGES += op->len;
+            }
+        }
+    }
+}
+
+static void rprog_emit(const char *tag, u64 issued_ops,
+                       u64 issued_log_writes, u64 issued_log_pages,
+                       u32 sid, u32 op_idx, u64 trace_ns, const op_t *op) {
+    double elapsed = T0 ? (now_ns() - T0) / 1000000000.0 : 0.0;
+    pthread_mutex_lock(&rprog_mu);
+    fprintf(stderr,
+            "progress[%s]: issued_trace_ops=%" PRIu64 "/%" PRIu64
+            " issued_log_writes=%" PRIu64 "/%" PRIu64
+            " issued_log_pages=%" PRIu64 "/%" PRIu64
+            " elapsed_s=%.3f",
+            tag, issued_ops, RPROG_TOTAL_OPS,
+            issued_log_writes, RPROG_TOTAL_LOG_WRITES,
+            issued_log_pages, RPROG_TOTAL_LOG_PAGES, elapsed);
+    if (op) {
+        fprintf(stderr,
+                " last_session=%u last_op_index=%u last_line=%" PRIu64
+                " last_trace_ns=%" PRIu64 " last_op=%s last_obj=%u last_off=%" PRIu64
+                " last_len=%" PRIu64,
+                sid, op_idx, op->line_no, trace_ns, op_name(op->op), op->obj, op->off, op->len);
+    }
+    fprintf(stderr, "\n");
+    pthread_mutex_unlock(&rprog_mu);
+}
+
+static void rprog_note_issued(u32 sid, u32 op_idx, u64 trace_ns, const op_t *op) {
+    if (!RPROG_INTERVAL) return;
+
+    u64 issued_ops = __sync_add_and_fetch(&RPROG_ISSUED_OPS, 1);
+    u64 issued_log_writes = rprog_atomic_read_u64(&RPROG_ISSUED_LOG_WRITES);
+    u64 issued_log_pages = rprog_atomic_read_u64(&RPROG_ISSUED_LOG_PAGES);
+    int is_log_write = rprog_is_log_write(op);
+    if (is_log_write) {
+        issued_log_writes = __sync_add_and_fetch(&RPROG_ISSUED_LOG_WRITES, 1);
+        issued_log_pages = __sync_add_and_fetch(&RPROG_ISSUED_LOG_PAGES, op->len);
+    }
+
+    int emit = (issued_ops == 1 || issued_ops == RPROG_TOTAL_OPS ||
+                issued_ops % RPROG_INTERVAL == 0);
+    if (is_log_write) {
+        emit = emit || issued_log_writes == RPROG_TOTAL_LOG_WRITES ||
+               issued_log_writes % RPROG_INTERVAL == 0;
+    }
+    if (emit)
+        rprog_emit("issued", issued_ops, issued_log_writes, issued_log_pages,
+                   sid, op_idx, trace_ns, op);
+}
+
+static void rprog_finish(void) {
+    if (!RPROG_INTERVAL) return;
+    rprog_emit("final",
+               rprog_atomic_read_u64(&RPROG_ISSUED_OPS),
+               rprog_atomic_read_u64(&RPROG_ISSUED_LOG_WRITES),
+               rprog_atomic_read_u64(&RPROG_ISSUED_LOG_PAGES),
+               0, 0, 0, NULL);
 }
 
 /* ---------------- per-session execution ---------------- */
@@ -623,6 +707,7 @@ static void *sess_thread(void *arg) {
             turn_stall = 0; turn_open = 1; turn_measured = 0;
         }
         if (run_op(o, &turn_stall, measure, sid, i, trace_ns) < 0) break;
+        rprog_note_issued(sid, i, trace_ns, o);
         if (measure) turn_measured = 1;
     }
     if (turn_open && turn_measured) lv_add(C_TURNSTALL, turn_stall);
@@ -682,16 +767,27 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "-o")) outp = argv[++i];
         else if (!strcmp(argv[i], "-s")) TSCALE = atof(argv[++i]);
         else if (!strcmp(argv[i], "-q")) QD = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--progress") || !strcmp(argv[i], "--progress-interval"))
+            RPROG_INTERVAL = strtoull(argv[++i], NULL, 10);
+        else if (!strcmp(argv[i], "--no-progress")) RPROG_INTERVAL = 0;
         else if (!strcmp(argv[i], "-k")) { 
             KSTRIPE = atoi(argv[++i]);
             if (KSTRIPE < 1) KSTRIPE = 1; 
             if (KSTRIPE > MAXK) KSTRIPE = MAXK; 
         }
     }
-    if (!tracef || !dev) { fprintf(stderr, "usage: replayer -t trace -d /dev/nvmeXnY -m conv|zns -o out [-s scale] [-q qd]\n"); return 1; }
+    if (!tracef || !dev) { fprintf(stderr, "usage: replayer -t trace -d /dev/nvmeXnY -m conv|zns -o out [-s scale] [-q qd] [--progress-interval n] [--no-progress]\n"); return 1; }
     TRACE_PATH = tracef;
     for (int c = 0; c < NCLS; c++) pthread_mutex_init(&LAT[c].mu, NULL);
     load_trace(tracef);
+    rprog_count_trace();
+    if (RPROG_INTERVAL) {
+        fprintf(stderr,
+                "progress: total_trace_ops=%" PRIu64 " total_log_writes=%" PRIu64
+                " total_log_pages=%" PRIu64 " interval=%" PRIu64 "\n",
+                RPROG_TOTAL_OPS, RPROG_TOTAL_LOG_WRITES,
+                RPROG_TOTAL_LOG_PAGES, RPROG_INTERVAL);
+    }
 
     FD = open(dev, O_RDWR | O_DIRECT);
     if (FD < 0) { perror("open dev"); return 1; }
@@ -745,6 +841,7 @@ int main(int argc, char **argv) {
         for (u32 s = 0; s < n_sess; s++) pthread_join(th[s], NULL);
         free(th);
     }
+    rprog_finish();
 
     int write_rc = write_outputs(outp, dev);
     int rc = stop_code();

@@ -15,7 +15,7 @@ MODE=""
 SIZE=""
 K=""
 
-MEMORY_START="8G"
+MEMORY_START="6G"
 CPU_LIST="0,1"
 DEVICE="/dev/nvme3n1"
 TRACE="../traces/tr_occ90_10.txt"

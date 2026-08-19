@@ -11,7 +11,7 @@ fi
 
 for (( k=1; k<=16; k*=2 ))
 do 
-   ./run_experiment.sh mode=zns size=32GiB k=$k trace=$TRACE scale=$SCALE
+   ./run_experiment.sh mode=zns size=40GiB k=$k trace=$TRACE scale=$SCALE
 done
 
-./run_experiment.sh mode=conv size=32GiB trace=$TRACE scale=$SCALE
+./run_experiment.sh mode=conv size=40GiB trace=$TRACE scale=$SCALE
