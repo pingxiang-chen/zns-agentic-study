@@ -9,3 +9,5 @@ nvmevirt-kit/results/*
 traces/*.txt
 results/*
 figs/*
+scripts/*.csv
+scripts/*.txt

@@ -71,7 +71,12 @@ static int KSTRIPE = 8;      /* -k: parallel zone chains per KV blob (zns mode).
                                 (write-pointer safe); K chains in parallel
                                 recover the stripe bandwidth that one QD1
                                 zone stream cannot exploit (ZenFS-style). */
-static u64 DEV_PGS, ZONE_PGS, N_ZONES;
+static int REQUESTED_KSTRIPE = 8;
+static u64 MAX_ACTIVE_ZONES_ARG = 0, DEVICE_MAX_ACTIVE_ZONES = 0, DEVICE_MAX_OPEN_ZONES = 0, ZNS_ACTIVE_ZONE_LIMIT = 0;
+static u64 PEAK_KV_ACTIVE_ZONES = 0, PEAK_LIVE_KV_SESSIONS = 0;
+static int KV_SHARED = 0, KV_SHARED_LANES = 0;
+#define ZNS_META_ACTIVE_ZONES 2        /* one memlog append zone + one index append zone */
+static u64 DEV_PGS, ZONE_PGS, ZONE_CAP_PGS, N_ZONES;
 static u64 IX_PGS, ML_PGS, t_end_ns, meas_start_ns;
 
 /* ---------------- stats ---------------- */
@@ -127,6 +132,15 @@ static void obj_add_ext(obj_t *o, u64 s, u64 n) {
     if (o->n_ext == o->cap_ext) { o->cap_ext = o->cap_ext ? o->cap_ext * 2 : 8; o->ext = realloc(o->ext, o->cap_ext * sizeof(ext_t)); }
     o->ext[o->n_ext++] = (ext_t){ s, n }; o->pgs += n;
 }
+static void obj_add_ext_nomerge(obj_t *o, u64 s, u64 n) {
+    if (o->n_ext == o->cap_ext) { o->cap_ext = o->cap_ext ? o->cap_ext * 2 : 8; o->ext = realloc(o->ext, o->cap_ext * sizeof(ext_t)); }
+    o->ext[o->n_ext++] = (ext_t){ s, n }; o->pgs += n;
+}
+static void ext_vec_add(ext_t **v, int *n, int *cap, u64 s, u64 pgs) {
+    if (!pgs) return;
+    if (*n == *cap) { *cap = *cap ? *cap * 2 : 8; *v = realloc(*v, *cap * sizeof(**v)); }
+    (*v)[(*n)++] = (ext_t){ s, pgs };
+}
 static u64 obj_lpn(obj_t *o, u64 off) {
     for (int i = 0; i < o->n_ext; i++) { if (off < o->ext[i].npgs) return o->ext[i].lpn_start + off; off -= o->ext[i].npgs; }
     fprintf(stderr, "obj offset past end\n"); exit(4);
@@ -150,11 +164,43 @@ static void zns_reset_zone(int z) {
     zfree[zf_tail % N_ZONES] = z; zf_tail++; zf_cnt++;
     pthread_mutex_unlock(&z_mu);
 }
+static u64 zns_zone_cap_rem(u64 pg) {
+    u64 off = pg % ZONE_PGS;
+    return off < ZONE_CAP_PGS ? ZONE_CAP_PGS - off : 0;
+}
+static u64 zns_report_zone_capacity_pgs(void) {
+#ifdef HAVE_BLKZONED
+    size_t sz = sizeof(struct blk_zone_report) + sizeof(struct blk_zone);
+    struct blk_zone_report *rep = calloc(1, sz);
+    if (!rep) return ZONE_PGS;
+    rep->sector = 0;
+    rep->nr_zones = 1;
+    if (ioctl(FD, BLKREPORTZONE, rep) == 0 && rep->nr_zones > 0) {
+        u64 cap_sec = rep->zones[0].capacity ? rep->zones[0].capacity : rep->zones[0].len;
+        u64 len_sec = rep->zones[0].len;
+        free(rep);
+        if (!cap_sec || cap_sec > len_sec) cap_sec = len_sec;
+        u64 cap_pgs = cap_sec * 512 / PGSZ;
+        return cap_pgs ? cap_pgs : ZONE_PGS;
+    }
+    perror("BLKREPORTZONE");
+    free(rep);
+#endif
+    return ZONE_PGS;
+}
 /* index LSM + memlog FIFO state (single-threaded via ix/ml mutexes) */
 static int *ix_zone_of, *ix_slot_of, *zn_live; static int *ixz, n_ixz, ix_open = -1, IX_BUDGET_Z;
 static u64 ix_open_wp;
 static int *mlz, n_mlz, ml_budget_z, ml_open = -1; static u64 ml_open_wp; static u64 *ml_page_zone;
 static pthread_mutex_t ix_mu = PTHREAD_MUTEX_INITIALIZER, ml_mu = PTHREAD_MUTEX_INITIALIZER;
+
+/* Shared KV-lane mode is used only when the active-zone budget cannot give each
+ * live session its own tail zone. KV operations are serialized so shared lane
+ * write pointers and relocation updates cannot race with reads. */
+static int *kv_lane_zone;
+static u64 *kv_lane_wp, *kv_zone_live;
+static unsigned char *kv_zone_used;
+static pthread_mutex_t kv_shared_mu = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---------------- raw I/O helpers ---------------- */
 static void *iobuf(void) { static __thread void *b = NULL; if (!b) { if (posix_memalign(&b, PGSZ, CMDSZ)) exit(9); memset(b, 0xA5, CMDSZ); } return b; }
@@ -165,7 +211,7 @@ static void pio(int wr, u64 pg, u64 npg) {          /* synchronous single comman
 }
 
 /* burst of commands with QD via POSIX AIO; entries: (pg, npg) */
-typedef struct { u64 pg, npg; } io_t;
+typedef struct { u64 pg, npg; int stream; } io_t;
 
 static void obj_emit_ios(obj_t *o, u64 off, u64 len, io_t *ios, int *nio) {
     for (int i = 0; i < o->n_ext && len; i++) {
@@ -174,7 +220,8 @@ static void obj_emit_ios(obj_t *o, u64 off, u64 len, io_t *ios, int *nio) {
         while (ext_off < o->ext[i].npgs && len) {
             u64 pg = o->ext[i].lpn_start + ext_off;
             u64 n = o->ext[i].npgs - ext_off;
-            u64 zrem = ZONE_PGS - (pg % ZONE_PGS);
+            u64 zrem = zns_zone_cap_rem(pg);
+            if (!zrem) { fprintf(stderr, "obj extent beyond zone capacity\n"); exit(4); }
             if (n > len) n = len;
             if (n > CMD_PGS) n = CMD_PGS;
             if (n > zrem) n = zrem;
@@ -294,6 +341,209 @@ static int rprog_is_log_write(const op_t *op) {
     return op && (op->op == OP_WKV || op->op == OP_WML || op->op == OP_WIX);
 }
 
+static int read_u64_file(const char *path, u64 *out) {
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    char buf[64];
+    int ok = fgets(buf, sizeof buf, f) != NULL;
+    fclose(f);
+    if (!ok) return 0;
+    *out = strtoull(buf, NULL, 10);
+    return 1;
+}
+
+
+static int kv_shared_lane_for(u32 obj, int stripe) {
+    u64 sid_part = obj >= 2 ? (u64)(obj - 2) : (u64)obj;
+    if (KV_SHARED_LANES <= 0) return 0;
+    return (int)((sid_part * (u64)KSTRIPE + (u64)stripe) % (u64)KV_SHARED_LANES);
+}
+
+static int kv_shared_zone_is_open_locked(int z) {
+    for (int i = 0; i < KV_SHARED_LANES; i++)
+        if (kv_lane_zone[i] == z && kv_lane_wp[i] < ZONE_CAP_PGS) return 1;
+    return 0;
+}
+
+static u64 kv_shared_lane_rem_locked(int lane) {
+    if (kv_lane_zone[lane] < 0 || kv_lane_wp[lane] == ZONE_CAP_PGS) return ZONE_CAP_PGS;
+    return ZONE_CAP_PGS - kv_lane_wp[lane];
+}
+
+static int kv_shared_append_locked(int lane, u64 n, u64 *pg) {
+    if (lane < 0 || lane >= KV_SHARED_LANES || !n) return -1;
+    if (kv_lane_zone[lane] < 0 || kv_lane_wp[lane] == ZONE_CAP_PGS) {
+        int z = zns_alloc_zone();
+        if (z < 0) return -1;
+        kv_lane_zone[lane] = z;
+        kv_lane_wp[lane] = 0;
+        kv_zone_used[z] = 1;
+    }
+    if (n > ZONE_CAP_PGS - kv_lane_wp[lane]) return -1;
+    int z = kv_lane_zone[lane];
+    *pg = (u64)z * ZONE_PGS + kv_lane_wp[lane];
+    kv_lane_wp[lane] += n;
+    kv_zone_live[z] += n;
+    kv_zone_used[z] = 1;
+    return 0;
+}
+
+static void kv_shared_dec_live_range_locked(u64 pg, u64 len) {
+    while (len) {
+        int z = (int)(pg / ZONE_PGS);
+        u64 n = len;
+        u64 zrem = zns_zone_cap_rem(pg);
+        if (!zrem) { fprintf(stderr, "shared KV extent beyond zone capacity\n"); exit(4); }
+        if (n > zrem) n = zrem;
+        if (z >= 0 && (u64)z < N_ZONES) {
+            kv_zone_live[z] = kv_zone_live[z] > n ? kv_zone_live[z] - n : 0;
+        }
+        pg += n;
+        len -= n;
+    }
+}
+
+static void kv_shared_reset_zone_locked(int z) {
+    if (z < 0 || (u64)z >= N_ZONES || !kv_zone_used[z]) return;
+    for (int i = 0; i < KV_SHARED_LANES; i++) {
+        if (kv_lane_zone[i] == z) {
+            kv_lane_zone[i] = -1;
+            kv_lane_wp[i] = 0;
+        }
+    }
+    kv_zone_live[z] = 0;
+    kv_zone_used[z] = 0;
+    zns_reset_zone(z);
+}
+
+static int kv_shared_pick_victim_locked(void) {
+    int best = -1;
+    u64 best_live = UINT64_MAX;
+    for (u64 z = 0; z < N_ZONES; z++) {
+        if (!kv_zone_used[z]) continue;
+        if (kv_shared_zone_is_open_locked((int)z)) continue;
+        if (kv_zone_live[z] >= ZONE_CAP_PGS) continue;
+        if (!kv_zone_live[z]) return (int)z;
+        if (kv_zone_live[z] < best_live) {
+            best_live = kv_zone_live[z];
+            best = (int)z;
+        }
+    }
+    return best;
+}
+
+static int kv_shared_relocate_range_locked(u32 obj, u64 logical, u64 oldpg, u64 len,
+                                           ext_t **new_ext, int *new_n, int *new_cap,
+                                           u32 sid, u32 op_idx, u64 trace_ns, const op_t *op) {
+    while (len) {
+        int stripe = (int)((logical / CMD_PGS) % (u64)KSTRIPE);
+        int lane = kv_shared_lane_for(obj, stripe);
+        u64 n = len;
+        u64 old_zrem = zns_zone_cap_rem(oldpg);
+        if (!old_zrem) { fprintf(stderr, "shared KV relocation extent beyond zone capacity\n"); exit(4); }
+        u64 cmd_rem = CMD_PGS - (logical % CMD_PGS);
+        u64 lane_rem = kv_shared_lane_rem_locked(lane);
+        if (n > old_zrem) n = old_zrem;
+        if (n > cmd_rem) n = cmd_rem;
+        if (n > lane_rem) n = lane_rem;
+
+        u64 newpg = 0;
+        if (!n || kv_shared_append_locked(lane, n, &newpg) < 0) {
+            request_storage_stop(3, "zns_shared_gc_out_of_zones", sid, op_idx, trace_ns, op);
+            return -1;
+        }
+        pio(0, oldpg, n);
+        pio(1, newpg, n);
+        kv_shared_dec_live_range_locked(oldpg, n);
+        ext_vec_add(new_ext, new_n, new_cap, newpg, n);
+        oldpg += n;
+        logical += n;
+        len -= n;
+    }
+    return 0;
+}
+
+static int kv_shared_compact_zone_locked(int victim, u32 sid, u32 op_idx, u64 trace_ns, const op_t *op) {
+    if (victim < 0 || (u64)victim >= N_ZONES || !kv_zone_used[victim]) return 0;
+    if (kv_shared_zone_is_open_locked(victim)) return 0;
+
+    for (u64 obj = 2; obj < n_objs + 2; obj++) {
+        obj_t *ob = &objs[obj];
+        pthread_mutex_lock(&ob->mu);
+        if (!ob->n_ext) {
+            pthread_mutex_unlock(&ob->mu);
+            continue;
+        }
+
+        ext_t *new_ext = NULL;
+        int new_n = 0, new_cap = 0, changed = 0;
+        u64 logical = 0;
+        for (int i = 0; i < ob->n_ext; i++) {
+            u64 phys = ob->ext[i].lpn_start;
+            u64 rem = ob->ext[i].npgs;
+            while (rem) {
+                int z = (int)(phys / ZONE_PGS);
+                u64 n = rem;
+                u64 zrem = zns_zone_cap_rem(phys);
+                if (!zrem) { fprintf(stderr, "shared KV compaction extent beyond zone capacity\n"); exit(4); }
+                u64 cmd_rem = CMD_PGS - (logical % CMD_PGS);
+                if (n > zrem) n = zrem;
+                if (n > cmd_rem) n = cmd_rem;
+                if (z == victim) {
+                    changed = 1;
+                    if (kv_shared_relocate_range_locked((u32)obj, logical, phys, n,
+                                                        &new_ext, &new_n, &new_cap,
+                                                        sid, op_idx, trace_ns, op) < 0) {
+                        pthread_mutex_unlock(&ob->mu);
+                        free(new_ext);
+                        return -1;
+                    }
+                } else {
+                    ext_vec_add(&new_ext, &new_n, &new_cap, phys, n);
+                }
+                phys += n;
+                logical += n;
+                rem -= n;
+            }
+        }
+
+        if (changed) {
+            u64 pgs = ob->pgs;
+            free(ob->ext);
+            ob->ext = new_ext;
+            ob->n_ext = new_n;
+            ob->cap_ext = new_cap;
+            ob->pgs = pgs;
+        } else {
+            free(new_ext);
+        }
+        pthread_mutex_unlock(&ob->mu);
+    }
+
+    if (kv_zone_live[victim]) {
+        fprintf(stderr, "warning: shared KV compaction left zone %d with %" PRIu64 " live pages\n",
+                victim, kv_zone_live[victim]);
+    }
+    kv_shared_reset_zone_locked(victim);
+    return 0;
+}
+
+static int kv_shared_gc_locked(u32 sid, u32 op_idx, u64 trace_ns, const op_t *op) {
+    for (u64 pass = 0; pass < N_ZONES; pass++) {
+        int victim = kv_shared_pick_victim_locked();
+        if (victim < 0) return 0;
+        if (kv_shared_compact_zone_locked(victim, sid, op_idx, trace_ns, op) < 0) return -1;
+    }
+    return 0;
+}
+
+static void kv_shared_delete_obj_locked(obj_t *ob) {
+    for (int i = 0; i < ob->n_ext; i++)
+        kv_shared_dec_live_range_locked(ob->ext[i].lpn_start, ob->ext[i].npgs);
+    ob->n_ext = 0;
+    ob->pgs = 0;
+}
+
 static u64 rprog_atomic_read_u64(u64 *v) {
     return __sync_add_and_fetch(v, 0);
 }
@@ -329,6 +579,230 @@ static void load_trace(const char *path) {
         }
     }
     fclose(fp);
+}
+
+typedef struct { u64 trace_ns; const op_t *op; } trace_event_t;
+
+static void trace_event_add(trace_event_t **ev, u64 *n, u64 *cap, u64 trace_ns, const op_t *op) {
+    if (*n == *cap) {
+        *cap = *cap ? *cap * 2 : 1024;
+        *ev = realloc(*ev, *cap * sizeof(**ev));
+    }
+    (*ev)[(*n)++] = (trace_event_t){ trace_ns, op };
+}
+
+static int cmp_trace_event(const void *a_, const void *b_) {
+    const trace_event_t *a = a_, *b = b_;
+    if (a->trace_ns < b->trace_ns) return -1;
+    if (a->trace_ns > b->trace_ns) return 1;
+    return (int)a->op->op - (int)b->op->op; /* WKV before DEL at identical time */
+}
+
+static trace_event_t *trace_kv_events(u64 *n_ev) {
+    trace_event_t *ev = NULL;
+    u64 n = 0, cap = 0;
+    for (u32 s = 0; s < n_sess; s++) {
+        sess_t *S = &sess[s];
+        u64 trace_ns = S->t0;
+        for (u32 i = 0; i < S->n; i++) {
+            op_t *op = &S->ops[i];
+            trace_ns += op->gap;
+            if (op->obj >= 2 && (op->op == OP_WKV || op->op == OP_DEL))
+                trace_event_add(&ev, &n, &cap, trace_ns, op);
+        }
+    }
+    qsort(ev, n, sizeof(*ev), cmp_trace_event);
+    *n_ev = n;
+    return ev;
+}
+
+static u64 trace_peak_kv_active_zones_for_k(int k, u64 *peak_live_out) {
+    u64 n_ev = 0;
+    trace_event_t *ev = trace_kv_events(&n_ev);
+    u64 n_slot = (n_objs + 2) * (u64)k;
+    u64 *wp = calloc(n_slot, sizeof(*wp));
+    u64 *obj_active = calloc(n_objs + 2, sizeof(*obj_active));
+    unsigned char *touched = calloc(n_slot, 1);
+    unsigned char *live = calloc(n_objs + 2, 1);
+    u64 active = 0, peak_active = 0, live_cnt = 0, peak_live = 0;
+
+    for (u64 e = 0; e < n_ev; e++) {
+        const op_t *op = ev[e].op;
+        u32 obj = op->obj;
+        if (obj >= n_objs + 2) continue;
+
+        if (op->op == OP_DEL) {
+            if (live[obj]) { live[obj] = 0; live_cnt--; }
+            active -= obj_active[obj];
+            obj_active[obj] = 0;
+            memset(&touched[(u64)obj * k], 0, k);
+            memset(&wp[(u64)obj * k], 0, k * sizeof(*wp));
+            continue;
+        }
+
+        if (op->op != OP_WKV) continue;
+        if (!live[obj]) {
+            live[obj] = 1;
+            live_cnt++;
+            if (live_cnt > peak_live) peak_live = live_cnt;
+        }
+
+        for (u64 p = 0; p < op->len; ) {
+            u64 lg = op->off + p;
+            u64 j = lg / CMD_PGS, in = lg % CMD_PGS;
+            int c = (int)(j % (u64)k);
+            u64 n = op->len - p;
+            if (n > CMD_PGS - in) n = CMD_PGS - in;
+
+            u64 idx = (u64)obj * k + c;
+            if (!touched[idx] || wp[idx] + n > ZONE_CAP_PGS) {
+                touched[idx] = 1;
+                wp[idx] = 0;
+                active++;
+                obj_active[obj]++;
+            }
+            wp[idx] += n;
+            if (wp[idx] == ZONE_CAP_PGS) {
+                active--;
+                obj_active[obj]--;
+            }
+            p += n;
+        }
+        if (active > peak_active) peak_active = active;
+    }
+
+    free(live);
+    free(touched);
+    free(obj_active);
+    free(wp);
+    free(ev);
+    if (peak_live_out) *peak_live_out = peak_live;
+    return peak_active;
+}
+
+static u64 trace_peak_kv_shared_active_zones(int lanes, u64 *peak_live_out) {
+    u64 n_ev = 0;
+    trace_event_t *ev = trace_kv_events(&n_ev);
+    int *lane_open = calloc(lanes, sizeof(*lane_open));
+    u64 *lane_wp = calloc(lanes, sizeof(*lane_wp));
+    unsigned char *live = calloc(n_objs + 2, 1);
+    u64 active = 0, peak_active = 0, live_cnt = 0, peak_live = 0;
+
+    for (u64 e = 0; e < n_ev; e++) {
+        const op_t *op = ev[e].op;
+        if (op->obj >= n_objs + 2) continue;
+        if (op->op == OP_DEL) {
+            if (live[op->obj]) { live[op->obj] = 0; live_cnt--; }
+            continue;
+        }
+        if (op->op != OP_WKV) continue;
+        if (!live[op->obj]) {
+            live[op->obj] = 1;
+            live_cnt++;
+            if (live_cnt > peak_live) peak_live = live_cnt;
+        }
+        for (u64 p = 0; p < op->len; ) {
+            u64 lg = op->off + p;
+            int stripe = (int)((lg / CMD_PGS) % (u64)KSTRIPE);
+            int lane = (int)((((u64)(op->obj - 2) * (u64)KSTRIPE) + (u64)stripe) % (u64)lanes);
+            u64 n = op->len - p;
+            u64 in = lg % CMD_PGS;
+            if (n > CMD_PGS - in) n = CMD_PGS - in;
+            if (!lane_open[lane] || lane_wp[lane] + n > ZONE_CAP_PGS) {
+                if (!lane_open[lane]) active++;
+                lane_open[lane] = 1;
+                lane_wp[lane] = 0;
+            }
+            lane_wp[lane] += n;
+            if (lane_wp[lane] == ZONE_CAP_PGS) {
+                lane_open[lane] = 0;
+                lane_wp[lane] = 0;
+                active--;
+            }
+            p += n;
+        }
+        if (active > peak_active) peak_active = active;
+    }
+
+    free(live);
+    free(lane_wp);
+    free(lane_open);
+    free(ev);
+    if (peak_live_out) *peak_live_out = peak_live;
+    return peak_active;
+}
+
+static void zns_configure_active_zone_mux(void) {
+    REQUESTED_KSTRIPE = KSTRIPE;
+    u64 dev_limit = 0;
+    if (DEVICE_MAX_ACTIVE_ZONES && DEVICE_MAX_OPEN_ZONES)
+        dev_limit = DEVICE_MAX_ACTIVE_ZONES < DEVICE_MAX_OPEN_ZONES ? DEVICE_MAX_ACTIVE_ZONES : DEVICE_MAX_OPEN_ZONES;
+    else
+        dev_limit = DEVICE_MAX_ACTIVE_ZONES ? DEVICE_MAX_ACTIVE_ZONES : DEVICE_MAX_OPEN_ZONES;
+    ZNS_ACTIVE_ZONE_LIMIT = MAX_ACTIVE_ZONES_ARG ? MAX_ACTIVE_ZONES_ARG : dev_limit;
+
+    if (!ZNS_ACTIVE_ZONE_LIMIT) {
+        PEAK_KV_ACTIVE_ZONES = trace_peak_kv_active_zones_for_k(KSTRIPE, &PEAK_LIVE_KV_SESSIONS);
+        fprintf(stderr,
+                "zns active-zone mux: mode=exclusive max_active_zones=unlimited peak_live_kv_sessions=%" PRIu64
+                " requested_k=%d effective_k=%d peak_kv_active_zones=%" PRIu64 "\n",
+                PEAK_LIVE_KV_SESSIONS, REQUESTED_KSTRIPE, KSTRIPE, PEAK_KV_ACTIVE_ZONES);
+        return;
+    }
+
+    int best_k = 0;
+    u64 best_peak = 0, best_live = 0;
+    for (int k = KSTRIPE; k >= 1; k--) {
+        u64 live = 0;
+        u64 peak = trace_peak_kv_active_zones_for_k(k, &live);
+        if (peak + ZNS_META_ACTIVE_ZONES <= ZNS_ACTIVE_ZONE_LIMIT) {
+            best_k = k;
+            best_peak = peak;
+            best_live = live;
+            break;
+        }
+    }
+
+    if (!best_k) {
+        u64 kv_lanes = ZNS_ACTIVE_ZONE_LIMIT > ZNS_META_ACTIVE_ZONES ?
+                       ZNS_ACTIVE_ZONE_LIMIT - ZNS_META_ACTIVE_ZONES : 0;
+        if (!kv_lanes) {
+            KSTRIPE = 1;
+            PEAK_KV_ACTIVE_ZONES = trace_peak_kv_active_zones_for_k(1, &PEAK_LIVE_KV_SESSIONS);
+            fprintf(stderr,
+                    "zns active-zone limit too small: max_active_zones=%" PRIu64
+                    " metadata_reserve=%d peak_live_kv_sessions=%" PRIu64
+                    " peak_kv_active_zones_at_k1=%" PRIu64 "\n",
+                    ZNS_ACTIVE_ZONE_LIMIT, ZNS_META_ACTIVE_ZONES,
+                    PEAK_LIVE_KV_SESSIONS, PEAK_KV_ACTIVE_ZONES);
+            request_storage_stop(3, "zns_max_active_zones_too_small", 0, 0, 0, NULL);
+            return;
+        }
+        if (kv_lanes > 0x7fffffffULL) kv_lanes = 0x7fffffffULL;
+        KV_SHARED = 1;
+        KV_SHARED_LANES = (int)kv_lanes;
+        PEAK_KV_ACTIVE_ZONES = trace_peak_kv_shared_active_zones(KV_SHARED_LANES, &PEAK_LIVE_KV_SESSIONS);
+        fprintf(stderr,
+                "zns active-zone mux: mode=shared max_active_zones=%" PRIu64
+                " peak_live_kv_sessions=%" PRIu64
+                " requested_k=%d shared_kv_lanes=%d peak_kv_active_zones=%" PRIu64
+                " active_zone_bound=%" PRIu64 "\n",
+                ZNS_ACTIVE_ZONE_LIMIT, PEAK_LIVE_KV_SESSIONS, REQUESTED_KSTRIPE,
+                KV_SHARED_LANES, PEAK_KV_ACTIVE_ZONES,
+                PEAK_KV_ACTIVE_ZONES + ZNS_META_ACTIVE_ZONES);
+        return;
+    }
+
+    KSTRIPE = best_k;
+    PEAK_KV_ACTIVE_ZONES = best_peak;
+    PEAK_LIVE_KV_SESSIONS = best_live;
+    fprintf(stderr,
+            "zns active-zone mux: mode=exclusive max_active_zones=%" PRIu64
+            " peak_live_kv_sessions=%" PRIu64
+            " requested_k=%d effective_k=%d peak_kv_active_zones=%" PRIu64
+            " active_zone_bound=%" PRIu64 "\n",
+            ZNS_ACTIVE_ZONE_LIMIT, PEAK_LIVE_KV_SESSIONS, REQUESTED_KSTRIPE, KSTRIPE,
+            PEAK_KV_ACTIVE_ZONES, PEAK_KV_ACTIVE_ZONES + ZNS_META_ACTIVE_ZONES);
 }
 
 static void rprog_count_trace(void) {
@@ -431,14 +905,17 @@ static int gap_sleep(u64 gap_ns) {
     return !stop_requested();
 }
 
-/* K parallel zone-chain workers; worker w handles ios[w], ios[w+K], ...
- * so each chain stays ordered while chains proceed in parallel. */
-struct sw_arg { io_t *ios; int nio, w, cls; };
+/* Write workers preserve per-stream ordering. In exclusive mode stream ==
+ * stripe chain; in shared mode stream == physical shared KV lane. */
+struct sw_arg { io_t *ios; int nio, w, cls, stride, by_stream; };
+static int sw_should_run(struct sw_arg *a, int i) {
+    return a->by_stream ? (a->ios[i].stream % a->stride) == a->w : (i % a->stride) == a->w;
+}
 static void *sw_worker(void *a_) {
     struct sw_arg *a = a_;
     char *buf; if (posix_memalign((void **)&buf, PGSZ, CMDSZ)) return NULL;
     memset(buf, 0x5A, CMDSZ);
-    for (int i = a->w; i < a->nio; i += KSTRIPE) {
+    for (int i = 0; i < a->nio; i++) if (sw_should_run(a, i)) {
         u64 c0 = now_ns();
         if (pwrite(FD, buf, a->ios[i].npg * PGSZ, a->ios[i].pg * PGSZ) < 0) { perror("zns pwrite"); exit(8); }
         if (a->cls >= 0) lv_add(a->cls, now_ns() - c0);
@@ -449,9 +926,12 @@ static void *sw_worker(void *a_) {
 static u64 zns_striped_write(io_t *ios, int nio, int cls) {
     u64 t0 = now_ns();
     pthread_t th[MAXK]; struct sw_arg args[MAXK];
-    int k = KSTRIPE < nio ? KSTRIPE : (nio ? nio : 1);
+    int streams = KV_SHARED ? KV_SHARED_LANES : KSTRIPE;
+    if (streams < 1) streams = 1;
+    int k = streams < nio ? streams : (nio ? nio : 1);
+    if (k > MAXK) k = MAXK;
     for (int w = 0; w < k; w++) {
-        args[w] = (struct sw_arg){ ios, nio, w, cls };
+        args[w] = (struct sw_arg){ ios, nio, w, cls, k, 1 };
         pthread_create(&th[w], NULL, sw_worker, &args[w]);
     }
     for (int w = 0; w < k; w++) pthread_join(th[w], NULL);
@@ -461,7 +941,7 @@ static u64 zns_striped_write(io_t *ios, int nio, int cls) {
 static void *sr_worker(void *a_) {
     struct sw_arg *a = a_;
     char *buf; if (posix_memalign((void **)&buf, PGSZ, CMDSZ)) return NULL;
-    for (int i = a->w; i < a->nio; i += KSTRIPE) {
+    for (int i = 0; i < a->nio; i++) if (sw_should_run(a, i)) {
         u64 c0 = now_ns();
         if (pread(FD, buf, a->ios[i].npg * PGSZ, a->ios[i].pg * PGSZ) < 0) { perror("zns pread"); exit(8); }
         if (a->cls >= 0) lv_add(a->cls, now_ns() - c0);
@@ -473,8 +953,9 @@ static u64 zns_striped_read(io_t *ios, int nio, int cls) {
     u64 t0 = now_ns();
     pthread_t th[MAXK]; struct sw_arg args[MAXK];
     int k = KSTRIPE < nio ? KSTRIPE : (nio ? nio : 1);
+    if (k > MAXK) k = MAXK;
     for (int w = 0; w < k; w++) {
-        args[w] = (struct sw_arg){ ios, nio, w, cls };
+        args[w] = (struct sw_arg){ ios, nio, w, cls, k, 0 };
         pthread_create(&th[w], NULL, sr_worker, &args[w]);
     }
     for (int w = 0; w < k; w++) pthread_join(th[w], NULL);
@@ -488,9 +969,61 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
     io_t *ios = malloc(sizeof(io_t) * (o->len / CMD_PGS + 2 + o->len));
     int nio = 0;
     u64 dur = 0;
-    int ob_locked = 0, ml_locked = 0, ix_locked = 0;
+    int ob_locked = 0, ml_locked = 0, ix_locked = 0, kv_locked = 0;
 
     if (stop_requested()) { free(ios); return -1; }
+
+    if (MODE_ZNS && KV_SHARED && (o->op == OP_WKV || o->op == OP_RKV || o->op == OP_DEL)) {
+        pthread_mutex_lock(&kv_shared_mu); kv_locked = 1;
+        pthread_mutex_lock(&ob->mu); ob_locked = 1;
+
+        if (o->op == OP_DEL) {
+            kv_shared_delete_obj_locked(ob);
+            pthread_mutex_unlock(&ob->mu); ob_locked = 0;
+            if (kv_shared_gc_locked(sid, op_idx, trace_ns, o) < 0) goto fail;
+            pthread_mutex_unlock(&kv_shared_mu); kv_locked = 0;
+            free(ios); return 0;
+        }
+
+        if (o->op == OP_WKV) {
+            if (o->off != ob->pgs) {
+                fprintf(stderr, "non-append WKV obj %u off %" PRIu64
+                        " expected %" PRIu64 "\n", o->obj, o->off, ob->pgs);
+                exit(4);
+            }
+            for (u64 p = 0; p < o->len; ) {
+                u64 lg = o->off + p;
+                u64 j = lg / CMD_PGS, in = lg % CMD_PGS;
+                int c = (int)(j % (u64)KSTRIPE);
+                int lane = kv_shared_lane_for(o->obj, c);
+                u64 n = o->len - p;
+                u64 lane_rem = kv_shared_lane_rem_locked(lane);
+                if (n > CMD_PGS - in) n = CMD_PGS - in;
+                if (n > lane_rem) n = lane_rem;
+
+                u64 pg = 0;
+                if (!n || kv_shared_append_locked(lane, n, &pg) < 0) {
+                    request_storage_stop(3, "zns_shared_out_of_zones", sid, op_idx, trace_ns, o);
+                    goto fail;
+                }
+                ios[nio++] = (io_t){ pg, n, lane };
+                obj_add_ext_nomerge(ob, pg, n);
+                p += n;
+            }
+            cls = C_KVWR;
+            pthread_mutex_unlock(&ob->mu); ob_locked = 0;
+            dur = zns_striped_write(ios, nio, measure ? cls : -1);
+            pthread_mutex_unlock(&kv_shared_mu); kv_locked = 0;
+            goto acct;
+        }
+
+        obj_emit_ios(ob, o->off, o->len, ios, &nio);
+        cls = C_KVRD;
+        pthread_mutex_unlock(&ob->mu); ob_locked = 0;
+        dur = zns_striped_read(ios, nio, measure ? cls : -1);
+        pthread_mutex_unlock(&kv_shared_mu); kv_locked = 0;
+        goto acct;
+    }
 
     if (o->op == OP_DEL) {
         pthread_mutex_lock(&ob->mu); ob_locked = 1;
@@ -558,7 +1091,7 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
                 int c = (int)(j % (u64)KSTRIPE);
                 u64 n = o->len - p;
                 if (n > CMD_PGS - in) n = CMD_PGS - in;
-                if (!ob->zc_n[c] || ob->zc_wp[c] + n > ZONE_PGS) {
+                if (!ob->zc_n[c] || ob->zc_wp[c] + n > ZONE_CAP_PGS) {
                     if (ob->zc_n[c] == ob->zc_cap[c]) { ob->zc_cap[c] = ob->zc_cap[c] ? ob->zc_cap[c]*2 : 8; ob->zc[c] = realloc(ob->zc[c], ob->zc_cap[c]*4); }
                     int z = zns_alloc_zone();
                     if (z < 0) {
@@ -568,7 +1101,7 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
                     ob->zc[c][ob->zc_n[c]++] = z; ob->zc_wp[c] = 0;
                 }
                 u64 pg = (u64)ob->zc[c][ob->zc_n[c]-1] * ZONE_PGS + ob->zc_wp[c];
-                ios[nio++] = (io_t){ pg, n };
+                ios[nio++] = (io_t){ pg, n, c };
                 obj_add_ext(ob, pg, n);
                 ob->zc_wp[c] += n;
                 p += n;
@@ -587,7 +1120,7 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
             pthread_mutex_lock(&ml_mu); ml_locked = 1;
             for (u64 p = 0; p < o->len; ) {
                 if (o->op == OP_WML) {
-                    if (ml_open < 0 || ml_open_wp == ZONE_PGS) {
+                    if (ml_open < 0 || ml_open_wp == ZONE_CAP_PGS) {
                         if (n_mlz >= ml_budget_z) {
                             int oz = mlz[0];
                             for (u64 q = 0; q < ML_PGS; q++){
@@ -606,7 +1139,7 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
                     }
 
                     u64 n = o->len - p;
-                    u64 zrem = ZONE_PGS - ml_open_wp;
+                    u64 zrem = ZONE_CAP_PGS - ml_open_wp;
                     if (n > CMD_PGS) n = CMD_PGS;
                     if (n > zrem) n = zrem;
 
@@ -632,7 +1165,7 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
             for (u64 p = 0; p < o->len; p++) {
                 u64 e = (o->off + p) % IX_PGS;
                 if (o->op == OP_WIX) {
-                    if (ix_open < 0 || ix_open_wp == ZONE_PGS) {
+                    if (ix_open < 0 || ix_open_wp == ZONE_CAP_PGS) {
                         ix_open = zns_alloc_zone();
                         if (ix_open < 0) {
                             request_storage_stop(3, "zns_out_of_zones", sid, op_idx, trace_ns, o);
@@ -645,7 +1178,7 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
                             if (vz >= 0) {
                                 for (u64 q = 0; q < IX_PGS; q++) if (ix_zone_of[q] == vz) {
                                     pio(0, (u64)vz * ZONE_PGS + ix_slot_of[q], 1);
-                                    if (ix_open_wp == ZONE_PGS) {
+                                    if (ix_open_wp == ZONE_CAP_PGS) {
                                         ix_open = zns_alloc_zone();
                                         if (ix_open < 0) {
                                             request_storage_stop(3, "zns_out_of_zones", sid, op_idx, trace_ns, o);
@@ -686,6 +1219,7 @@ fail:
     if (ix_locked) pthread_mutex_unlock(&ix_mu);
     if (ml_locked) pthread_mutex_unlock(&ml_mu);
     if (ob_locked) pthread_mutex_unlock(&ob->mu);
+    if (kv_locked) pthread_mutex_unlock(&kv_shared_mu);
     free(ios);
     return -1;
 }
@@ -724,6 +1258,17 @@ static int write_outputs(const char *outp, const char *dev) {
     if (!out) { perror("summary"); return 1; }
 
     fprintf(out, "mode=%s tscale=%.3f qd=%d device=%s\n", MODE_ZNS ? "zns" : "conv", TSCALE, QD, dev);
+    if (MODE_ZNS) {
+        fprintf(out,
+                "ZNS_ACTIVE_MUX mode=%s max_active_zones=%" PRIu64
+                " requested_k=%d effective_k=%d shared_kv_lanes=%d peak_live_kv_sessions=%" PRIu64
+                " peak_kv_active_zones=%" PRIu64
+                " metadata_active_reserve=%d active_zone_bound=%" PRIu64 "\n",
+                KV_SHARED ? "shared" : "exclusive", ZNS_ACTIVE_ZONE_LIMIT,
+                REQUESTED_KSTRIPE, KSTRIPE, KV_SHARED_LANES,
+                PEAK_LIVE_KV_SESSIONS, PEAK_KV_ACTIVE_ZONES, ZNS_META_ACTIVE_ZONES,
+                PEAK_KV_ACTIVE_ZONES + ZNS_META_ACTIVE_ZONES);
+    }
     pthread_mutex_lock(&stop_mu);
     if (STOP_INFO.active) {
         fprintf(out, "RUN_STATUS incomplete reason=%s", STOP_INFO.reason);
@@ -770,13 +1315,15 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--progress") || !strcmp(argv[i], "--progress-interval"))
             RPROG_INTERVAL = strtoull(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--no-progress")) RPROG_INTERVAL = 0;
+        else if (!strcmp(argv[i], "--max-active-zones") || !strcmp(argv[i], "--max-open-zones") || !strcmp(argv[i], "-A"))
+            MAX_ACTIVE_ZONES_ARG = strtoull(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "-k")) { 
             KSTRIPE = atoi(argv[++i]);
             if (KSTRIPE < 1) KSTRIPE = 1; 
             if (KSTRIPE > MAXK) KSTRIPE = MAXK; 
         }
     }
-    if (!tracef || !dev) { fprintf(stderr, "usage: replayer -t trace -d /dev/nvmeXnY -m conv|zns -o out [-s scale] [-q qd] [--progress-interval n] [--no-progress]\n"); return 1; }
+    if (!tracef || !dev) { fprintf(stderr, "usage: replayer -t trace -d /dev/nvmeXnY -m conv|zns -o out [-s scale] [-q qd] [-k kv_stripes] [-A max_active_or_open_zones] [--progress-interval n] [--no-progress]\n"); return 1; }
     TRACE_PATH = tracef;
     for (int c = 0; c < NCLS; c++) pthread_mutex_init(&LAT[c].mu, NULL);
     load_trace(tracef);
@@ -808,23 +1355,37 @@ int main(int argc, char **argv) {
         }
     } else {
         u64 zsec = 0;
-        char sysp[256], buf[64];
+        char sysp[256];
         const char *base = strrchr(dev, '/'); base = base ? base + 1 : dev;
         snprintf(sysp, sizeof sysp, "/sys/block/%s/queue/chunk_sectors", base);
-        FILE *f = fopen(sysp, "r");
-        if (f) { if (fgets(buf, sizeof buf, f)) zsec = strtoull(buf, NULL, 10); fclose(f); }
+        read_u64_file(sysp, &zsec);
         if (!zsec) { fprintf(stderr, "cannot read zone size (chunk_sectors); is %s zoned?\n", dev); return 1; }
         ZONE_PGS = zsec * 512 / PGSZ; N_ZONES = DEV_PGS / ZONE_PGS;
-        fprintf(stderr, "zones: %" PRIu64 " x %.1f MiB\n", N_ZONES, ZONE_PGS * PGSZ / 1048576.0);
+        ZONE_CAP_PGS = zns_report_zone_capacity_pgs();
+        if (!ZONE_CAP_PGS || ZONE_CAP_PGS > ZONE_PGS) ZONE_CAP_PGS = ZONE_PGS;
+        fprintf(stderr, "zones: %" PRIu64 " x %.1f MiB, capacity %.1f MiB\n",
+                N_ZONES, ZONE_PGS * PGSZ / 1048576.0, ZONE_CAP_PGS * PGSZ / 1048576.0);
+        snprintf(sysp, sizeof sysp, "/sys/block/%s/queue/max_active_zones", base);
+        read_u64_file(sysp, &DEVICE_MAX_ACTIVE_ZONES);
+        snprintf(sysp, sizeof sysp, "/sys/block/%s/queue/max_open_zones", base);
+        read_u64_file(sysp, &DEVICE_MAX_OPEN_ZONES);
+        zns_configure_active_zone_mux();
         zfree = malloc(N_ZONES * 4);
         for (u64 i = 0; i < N_ZONES; i++) zfree[i] = (int)i;
         zf_head = 0; zf_tail = 0; zf_cnt = N_ZONES; zf_tail = N_ZONES;
+        if (KV_SHARED) {
+            kv_lane_zone = malloc((size_t)KV_SHARED_LANES * sizeof(*kv_lane_zone));
+            kv_lane_wp = calloc((size_t)KV_SHARED_LANES, sizeof(*kv_lane_wp));
+            kv_zone_live = calloc(N_ZONES, sizeof(*kv_zone_live));
+            kv_zone_used = calloc(N_ZONES, 1);
+            for (int i = 0; i < KV_SHARED_LANES; i++) kv_lane_zone[i] = -1;
+        }
         ix_zone_of = malloc(IX_PGS * 4); ix_slot_of = malloc(IX_PGS * 4);
         for (u64 i = 0; i < IX_PGS; i++) ix_zone_of[i] = -1;
         zn_live = calloc(N_ZONES, 4);
-        IX_BUDGET_Z = (int)(2 * ((IX_PGS + ZONE_PGS - 1) / ZONE_PGS)) + 1;
+        IX_BUDGET_Z = (int)(2 * ((IX_PGS + ZONE_CAP_PGS - 1) / ZONE_CAP_PGS)) + 1;
         ixz = malloc((IX_BUDGET_Z + 8) * 4);
-        ml_budget_z = (int)((ML_PGS + ZONE_PGS - 1) / ZONE_PGS) + 1;
+        ml_budget_z = (int)((ML_PGS + ZONE_CAP_PGS - 1) / ZONE_CAP_PGS) + 1;
         mlz = malloc((ml_budget_z + 2) * 4);
         ml_page_zone = malloc(ML_PGS * 8); memset(ml_page_zone, 0xFF, ML_PGS * 8);
         /* reset all zones to a clean state */
