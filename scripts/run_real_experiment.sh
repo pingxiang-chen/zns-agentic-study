@@ -17,7 +17,7 @@ SIZE=""
 K=""
 
 DEVICE=""
-TRACE="../traces/tr_occ90_10.txt"
+TRACE="../traces/tr_occ90.txt"
 SCALE="0.25"
 OUTPUT=""
 STAT_FILE=""

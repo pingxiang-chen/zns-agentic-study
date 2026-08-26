@@ -9,7 +9,7 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-for (( k=1; k<=16; k*=2 ))
+for (( k=1; k<=8; k*=2 ))
 do 
     ./run_real_experiment.sh mode=zns device=/dev/nvme0n1 k=$k confirm=YES_I_UNDERSTAND trace=$TRACE scale=$SCALE
 done

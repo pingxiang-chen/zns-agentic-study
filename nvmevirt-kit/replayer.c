@@ -7,8 +7,10 @@
  *   - user-space extent allocator over the raw LBA space (first-fit, coalescing),
  *     mirrors the simulator's host layer; DELETE issues BLKDISCARD (TRIM).
  * ZNS mode (-m zns):
- *   - zone-per-session KV blobs, FIFO memlog zones, log-structured index zones
- *     with host compaction; DELETE issues BLKRESETZONE.
+ *   - KV blobs use per-session zone chains when the device reports no open-zone
+ *     limit, or runtime-multiplexed KV lanes when max_open_zones is bounded.
+ *   - FIFO memlog zones, log-structured index zones with host compaction;
+ *     DELETE issues BLKRESETZONE.
  *   - intra-zone writes at QD1 (write-pointer rule); reads at full QD.
  *
  * I/O: O_DIRECT, 128 KiB commands, per-burst QD via POSIX AIO (portable;
@@ -72,10 +74,11 @@ static int KSTRIPE = 8;      /* -k: parallel zone chains per KV blob (zns mode).
                                 recover the stripe bandwidth that one QD1
                                 zone stream cannot exploit (ZenFS-style). */
 static int REQUESTED_KSTRIPE = 8;
-static u64 MAX_ACTIVE_ZONES_ARG = 0, DEVICE_MAX_ACTIVE_ZONES = 0, DEVICE_MAX_OPEN_ZONES = 0, ZNS_ACTIVE_ZONE_LIMIT = 0;
-static u64 PEAK_KV_ACTIVE_ZONES = 0, PEAK_LIVE_KV_SESSIONS = 0;
+static u64 MAX_OPEN_ZONES_ARG = 0, DEVICE_MAX_ACTIVE_ZONES = 0, DEVICE_MAX_OPEN_ZONES = 0, ZNS_OPEN_ZONE_LIMIT = 0;
+static u64 KV_OPEN_ZONE_LIMIT = 0, KV_OPEN_ZONES = 0, PEAK_KV_OPEN_ZONES = 0;
+static u64 LIVE_KV_SESSIONS = 0, PEAK_LIVE_KV_SESSIONS = 0;
 static int KV_SHARED = 0, KV_SHARED_LANES = 0;
-#define ZNS_META_ACTIVE_ZONES 2        /* one memlog append zone + one index append zone */
+#define ZNS_META_OPEN_ZONES 2        /* one memlog append zone + one index append zone */
 static u64 DEV_PGS, ZONE_PGS, ZONE_CAP_PGS, N_ZONES;
 static u64 IX_PGS, ML_PGS, t_end_ns, meas_start_ns;
 
@@ -194,12 +197,15 @@ static u64 ix_open_wp;
 static int *mlz, n_mlz, ml_budget_z, ml_open = -1; static u64 ml_open_wp; static u64 *ml_page_zone;
 static pthread_mutex_t ix_mu = PTHREAD_MUTEX_INITIALIZER, ml_mu = PTHREAD_MUTEX_INITIALIZER;
 
-/* Shared KV-lane mode is used only when the active-zone budget cannot give each
- * live session its own tail zone. KV operations are serialized so shared lane
- * write pointers and relocation updates cannot race with reads. */
+/* Runtime KV-lane mode multiplexes live sessions over the open-zone budget left
+ * after reserving one memlog append zone and one index append zone. KV
+ * operations are serialized so shared lane write pointers, live-session slots,
+ * and relocation updates cannot race with reads. */
 static int *kv_lane_zone;
 static u64 *kv_lane_wp, *kv_zone_live;
 static unsigned char *kv_zone_used;
+static int *kv_obj_slot;
+static u32 *kv_active_obj;
 static pthread_mutex_t kv_shared_mu = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---------------- raw I/O helpers ---------------- */
@@ -277,6 +283,62 @@ static u64 RPROG_TOTAL_OPS, RPROG_TOTAL_LOG_WRITES, RPROG_TOTAL_LOG_PAGES;
 static u64 RPROG_ISSUED_OPS, RPROG_ISSUED_LOG_WRITES, RPROG_ISSUED_LOG_PAGES;
 static pthread_mutex_t rprog_mu = PTHREAD_MUTEX_INITIALIZER;
 
+enum { ZNS_HOST_GC_KV = 0, ZNS_HOST_GC_INDEX = 1, ZNS_HOST_GC_MEMLOG = 2 };
+static u64 ZNS_USER_WRITE_PAGES, ZNS_TOTAL_USER_WRITE_PAGES;
+static u64 ZNS_HOST_COPY_PAGES, ZNS_TOTAL_HOST_COPY_PAGES;
+static u64 ZNS_HOST_GC_COUNT, ZNS_TOTAL_HOST_GC_COUNT;
+static u64 ZNS_HOST_GC_KV_COUNT, ZNS_TOTAL_HOST_GC_KV_COUNT;
+static u64 ZNS_HOST_GC_INDEX_COUNT, ZNS_TOTAL_HOST_GC_INDEX_COUNT;
+static u64 ZNS_HOST_GC_MEMLOG_COUNT, ZNS_TOTAL_HOST_GC_MEMLOG_COUNT;
+static u64 ZNS_HOST_GC_RESET_ZONES, ZNS_TOTAL_HOST_GC_RESET_ZONES;
+
+static void zns_count_pages(u64 *measured, u64 *total, u64 pages, int measure) {
+    if (!MODE_ZNS || !pages) return;
+    __sync_fetch_and_add(total, pages);
+    if (measure) __sync_fetch_and_add(measured, pages);
+}
+
+static void zns_note_user_write_pages(u64 pages, int measure) {
+    zns_count_pages(&ZNS_USER_WRITE_PAGES, &ZNS_TOTAL_USER_WRITE_PAGES, pages, measure);
+}
+
+static void zns_note_host_copy_pages(u64 pages, int measure) {
+    zns_count_pages(&ZNS_HOST_COPY_PAGES, &ZNS_TOTAL_HOST_COPY_PAGES, pages, measure);
+}
+
+static void zns_note_host_gc(int kind, u64 reset_zones, int measure) {
+    u64 *measured_kind = NULL, *total_kind = NULL;
+
+    if (!MODE_ZNS) return;
+
+    __sync_fetch_and_add(&ZNS_TOTAL_HOST_GC_COUNT, 1);
+    __sync_fetch_and_add(&ZNS_TOTAL_HOST_GC_RESET_ZONES, reset_zones);
+    if (measure) {
+        __sync_fetch_and_add(&ZNS_HOST_GC_COUNT, 1);
+        __sync_fetch_and_add(&ZNS_HOST_GC_RESET_ZONES, reset_zones);
+    }
+
+    switch (kind) {
+    case ZNS_HOST_GC_KV:
+        measured_kind = &ZNS_HOST_GC_KV_COUNT;
+        total_kind = &ZNS_TOTAL_HOST_GC_KV_COUNT;
+        break;
+    case ZNS_HOST_GC_INDEX:
+        measured_kind = &ZNS_HOST_GC_INDEX_COUNT;
+        total_kind = &ZNS_TOTAL_HOST_GC_INDEX_COUNT;
+        break;
+    case ZNS_HOST_GC_MEMLOG:
+        measured_kind = &ZNS_HOST_GC_MEMLOG_COUNT;
+        total_kind = &ZNS_TOTAL_HOST_GC_MEMLOG_COUNT;
+        break;
+    default:
+        return;
+    }
+
+    __sync_fetch_and_add(total_kind, 1);
+    if (measure) __sync_fetch_and_add(measured_kind, 1);
+}
+
 typedef struct {
     int active, code;
     char reason[64];
@@ -353,10 +415,49 @@ static int read_u64_file(const char *path, u64 *out) {
 }
 
 
-static int kv_shared_lane_for(u32 obj, int stripe) {
-    u64 sid_part = obj >= 2 ? (u64)(obj - 2) : (u64)obj;
+static void kv_shared_note_live_obj_locked(u32 obj) {
+    if (!kv_obj_slot || obj >= n_objs + 2 || kv_obj_slot[obj] >= 0) return;
+    kv_obj_slot[obj] = (int)LIVE_KV_SESSIONS;
+    kv_active_obj[LIVE_KV_SESSIONS++] = obj;
+    if (LIVE_KV_SESSIONS > PEAK_LIVE_KV_SESSIONS)
+        PEAK_LIVE_KV_SESSIONS = LIVE_KV_SESSIONS;
+}
+
+static void kv_shared_note_deleted_obj_locked(u32 obj) {
+    if (!kv_obj_slot || obj >= n_objs + 2 || kv_obj_slot[obj] < 0) return;
+    int slot = kv_obj_slot[obj];
+    u64 last = LIVE_KV_SESSIONS - 1;
+    if ((u64)slot != last) {
+        u32 moved = kv_active_obj[last];
+        kv_active_obj[slot] = moved;
+        kv_obj_slot[moved] = slot;
+    }
+    kv_obj_slot[obj] = -1;
+    LIVE_KV_SESSIONS--;
+}
+
+static void kv_shared_note_zone_open_locked(void) {
+    KV_OPEN_ZONES++;
+    if (KV_OPEN_ZONES > PEAK_KV_OPEN_ZONES)
+        PEAK_KV_OPEN_ZONES = KV_OPEN_ZONES;
+}
+
+static void kv_shared_note_zone_closed_locked(void) {
+    if (KV_OPEN_ZONES) KV_OPEN_ZONES--;
+}
+
+static int kv_shared_lane_for_locked(u32 obj, int stripe) {
     if (KV_SHARED_LANES <= 0) return 0;
-    return (int)((sid_part * (u64)KSTRIPE + (u64)stripe) % (u64)KV_SHARED_LANES);
+
+    u64 lanes = (u64)KV_SHARED_LANES;
+    u64 live = LIVE_KV_SESSIONS ? LIVE_KV_SESSIONS : 1;
+    u64 lanes_per_session = lanes / live;
+    int slot = (kv_obj_slot && obj < n_objs + 2) ? kv_obj_slot[obj] : -1;
+    u64 sid_part = slot >= 0 ? (u64)slot : (obj >= 2 ? (u64)(obj - 2) : (u64)obj);
+
+    if (!lanes_per_session) lanes_per_session = 1;
+    if (lanes_per_session > (u64)KSTRIPE) lanes_per_session = (u64)KSTRIPE;
+    return (int)((sid_part * lanes_per_session + (u64)stripe % lanes_per_session) % lanes);
 }
 
 static int kv_shared_zone_is_open_locked(int z) {
@@ -378,6 +479,7 @@ static int kv_shared_append_locked(int lane, u64 n, u64 *pg) {
         kv_lane_zone[lane] = z;
         kv_lane_wp[lane] = 0;
         kv_zone_used[z] = 1;
+        kv_shared_note_zone_open_locked();
     }
     if (n > ZONE_CAP_PGS - kv_lane_wp[lane]) return -1;
     int z = kv_lane_zone[lane];
@@ -385,6 +487,8 @@ static int kv_shared_append_locked(int lane, u64 n, u64 *pg) {
     kv_lane_wp[lane] += n;
     kv_zone_live[z] += n;
     kv_zone_used[z] = 1;
+    if (kv_lane_wp[lane] == ZONE_CAP_PGS)
+        kv_shared_note_zone_closed_locked();
     return 0;
 }
 
@@ -405,12 +509,15 @@ static void kv_shared_dec_live_range_locked(u64 pg, u64 len) {
 
 static void kv_shared_reset_zone_locked(int z) {
     if (z < 0 || (u64)z >= N_ZONES || !kv_zone_used[z]) return;
+    int was_open = 0;
     for (int i = 0; i < KV_SHARED_LANES; i++) {
         if (kv_lane_zone[i] == z) {
+            if (kv_lane_wp[i] < ZONE_CAP_PGS) was_open = 1;
             kv_lane_zone[i] = -1;
             kv_lane_wp[i] = 0;
         }
     }
+    if (was_open) kv_shared_note_zone_closed_locked();
     kv_zone_live[z] = 0;
     kv_zone_used[z] = 0;
     zns_reset_zone(z);
@@ -434,10 +541,11 @@ static int kv_shared_pick_victim_locked(void) {
 
 static int kv_shared_relocate_range_locked(u32 obj, u64 logical, u64 oldpg, u64 len,
                                            ext_t **new_ext, int *new_n, int *new_cap,
-                                           u32 sid, u32 op_idx, u64 trace_ns, const op_t *op) {
+                                           u32 sid, u32 op_idx, u64 trace_ns, const op_t *op,
+                                           int measure) {
     while (len) {
         int stripe = (int)((logical / CMD_PGS) % (u64)KSTRIPE);
-        int lane = kv_shared_lane_for(obj, stripe);
+        int lane = kv_shared_lane_for_locked(obj, stripe);
         u64 n = len;
         u64 old_zrem = zns_zone_cap_rem(oldpg);
         if (!old_zrem) { fprintf(stderr, "shared KV relocation extent beyond zone capacity\n"); exit(4); }
@@ -454,6 +562,7 @@ static int kv_shared_relocate_range_locked(u32 obj, u64 logical, u64 oldpg, u64 
         }
         pio(0, oldpg, n);
         pio(1, newpg, n);
+        zns_note_host_copy_pages(n, measure);
         kv_shared_dec_live_range_locked(oldpg, n);
         ext_vec_add(new_ext, new_n, new_cap, newpg, n);
         oldpg += n;
@@ -463,7 +572,8 @@ static int kv_shared_relocate_range_locked(u32 obj, u64 logical, u64 oldpg, u64 
     return 0;
 }
 
-static int kv_shared_compact_zone_locked(int victim, u32 sid, u32 op_idx, u64 trace_ns, const op_t *op) {
+static int kv_shared_compact_zone_locked(int victim, u32 sid, u32 op_idx, u64 trace_ns, const op_t *op,
+                                             int measure) {
     if (victim < 0 || (u64)victim >= N_ZONES || !kv_zone_used[victim]) return 0;
     if (kv_shared_zone_is_open_locked(victim)) return 0;
 
@@ -493,7 +603,7 @@ static int kv_shared_compact_zone_locked(int victim, u32 sid, u32 op_idx, u64 tr
                     changed = 1;
                     if (kv_shared_relocate_range_locked((u32)obj, logical, phys, n,
                                                         &new_ext, &new_n, &new_cap,
-                                                        sid, op_idx, trace_ns, op) < 0) {
+                                                        sid, op_idx, trace_ns, op, measure) < 0) {
                         pthread_mutex_unlock(&ob->mu);
                         free(new_ext);
                         return -1;
@@ -525,21 +635,23 @@ static int kv_shared_compact_zone_locked(int victim, u32 sid, u32 op_idx, u64 tr
                 victim, kv_zone_live[victim]);
     }
     kv_shared_reset_zone_locked(victim);
+    zns_note_host_gc(ZNS_HOST_GC_KV, 1, measure);
     return 0;
 }
 
-static int kv_shared_gc_locked(u32 sid, u32 op_idx, u64 trace_ns, const op_t *op) {
+static int kv_shared_gc_locked(u32 sid, u32 op_idx, u64 trace_ns, const op_t *op, int measure) {
     for (u64 pass = 0; pass < N_ZONES; pass++) {
         int victim = kv_shared_pick_victim_locked();
         if (victim < 0) return 0;
-        if (kv_shared_compact_zone_locked(victim, sid, op_idx, trace_ns, op) < 0) return -1;
+        if (kv_shared_compact_zone_locked(victim, sid, op_idx, trace_ns, op, measure) < 0) return -1;
     }
     return 0;
 }
 
-static void kv_shared_delete_obj_locked(obj_t *ob) {
+static void kv_shared_delete_obj_locked(u32 obj, obj_t *ob) {
     for (int i = 0; i < ob->n_ext; i++)
         kv_shared_dec_live_range_locked(ob->ext[i].lpn_start, ob->ext[i].npgs);
+    kv_shared_note_deleted_obj_locked(obj);
     ob->n_ext = 0;
     ob->pgs = 0;
 }
@@ -581,228 +693,39 @@ static void load_trace(const char *path) {
     fclose(fp);
 }
 
-typedef struct { u64 trace_ns; const op_t *op; } trace_event_t;
-
-static void trace_event_add(trace_event_t **ev, u64 *n, u64 *cap, u64 trace_ns, const op_t *op) {
-    if (*n == *cap) {
-        *cap = *cap ? *cap * 2 : 1024;
-        *ev = realloc(*ev, *cap * sizeof(**ev));
-    }
-    (*ev)[(*n)++] = (trace_event_t){ trace_ns, op };
-}
-
-static int cmp_trace_event(const void *a_, const void *b_) {
-    const trace_event_t *a = a_, *b = b_;
-    if (a->trace_ns < b->trace_ns) return -1;
-    if (a->trace_ns > b->trace_ns) return 1;
-    return (int)a->op->op - (int)b->op->op; /* WKV before DEL at identical time */
-}
-
-static trace_event_t *trace_kv_events(u64 *n_ev) {
-    trace_event_t *ev = NULL;
-    u64 n = 0, cap = 0;
-    for (u32 s = 0; s < n_sess; s++) {
-        sess_t *S = &sess[s];
-        u64 trace_ns = S->t0;
-        for (u32 i = 0; i < S->n; i++) {
-            op_t *op = &S->ops[i];
-            trace_ns += op->gap;
-            if (op->obj >= 2 && (op->op == OP_WKV || op->op == OP_DEL))
-                trace_event_add(&ev, &n, &cap, trace_ns, op);
-        }
-    }
-    qsort(ev, n, sizeof(*ev), cmp_trace_event);
-    *n_ev = n;
-    return ev;
-}
-
-static u64 trace_peak_kv_active_zones_for_k(int k, u64 *peak_live_out) {
-    u64 n_ev = 0;
-    trace_event_t *ev = trace_kv_events(&n_ev);
-    u64 n_slot = (n_objs + 2) * (u64)k;
-    u64 *wp = calloc(n_slot, sizeof(*wp));
-    u64 *obj_active = calloc(n_objs + 2, sizeof(*obj_active));
-    unsigned char *touched = calloc(n_slot, 1);
-    unsigned char *live = calloc(n_objs + 2, 1);
-    u64 active = 0, peak_active = 0, live_cnt = 0, peak_live = 0;
-
-    for (u64 e = 0; e < n_ev; e++) {
-        const op_t *op = ev[e].op;
-        u32 obj = op->obj;
-        if (obj >= n_objs + 2) continue;
-
-        if (op->op == OP_DEL) {
-            if (live[obj]) { live[obj] = 0; live_cnt--; }
-            active -= obj_active[obj];
-            obj_active[obj] = 0;
-            memset(&touched[(u64)obj * k], 0, k);
-            memset(&wp[(u64)obj * k], 0, k * sizeof(*wp));
-            continue;
-        }
-
-        if (op->op != OP_WKV) continue;
-        if (!live[obj]) {
-            live[obj] = 1;
-            live_cnt++;
-            if (live_cnt > peak_live) peak_live = live_cnt;
-        }
-
-        for (u64 p = 0; p < op->len; ) {
-            u64 lg = op->off + p;
-            u64 j = lg / CMD_PGS, in = lg % CMD_PGS;
-            int c = (int)(j % (u64)k);
-            u64 n = op->len - p;
-            if (n > CMD_PGS - in) n = CMD_PGS - in;
-
-            u64 idx = (u64)obj * k + c;
-            if (!touched[idx] || wp[idx] + n > ZONE_CAP_PGS) {
-                touched[idx] = 1;
-                wp[idx] = 0;
-                active++;
-                obj_active[obj]++;
-            }
-            wp[idx] += n;
-            if (wp[idx] == ZONE_CAP_PGS) {
-                active--;
-                obj_active[obj]--;
-            }
-            p += n;
-        }
-        if (active > peak_active) peak_active = active;
-    }
-
-    free(live);
-    free(touched);
-    free(obj_active);
-    free(wp);
-    free(ev);
-    if (peak_live_out) *peak_live_out = peak_live;
-    return peak_active;
-}
-
-static u64 trace_peak_kv_shared_active_zones(int lanes, u64 *peak_live_out) {
-    u64 n_ev = 0;
-    trace_event_t *ev = trace_kv_events(&n_ev);
-    int *lane_open = calloc(lanes, sizeof(*lane_open));
-    u64 *lane_wp = calloc(lanes, sizeof(*lane_wp));
-    unsigned char *live = calloc(n_objs + 2, 1);
-    u64 active = 0, peak_active = 0, live_cnt = 0, peak_live = 0;
-
-    for (u64 e = 0; e < n_ev; e++) {
-        const op_t *op = ev[e].op;
-        if (op->obj >= n_objs + 2) continue;
-        if (op->op == OP_DEL) {
-            if (live[op->obj]) { live[op->obj] = 0; live_cnt--; }
-            continue;
-        }
-        if (op->op != OP_WKV) continue;
-        if (!live[op->obj]) {
-            live[op->obj] = 1;
-            live_cnt++;
-            if (live_cnt > peak_live) peak_live = live_cnt;
-        }
-        for (u64 p = 0; p < op->len; ) {
-            u64 lg = op->off + p;
-            int stripe = (int)((lg / CMD_PGS) % (u64)KSTRIPE);
-            int lane = (int)((((u64)(op->obj - 2) * (u64)KSTRIPE) + (u64)stripe) % (u64)lanes);
-            u64 n = op->len - p;
-            u64 in = lg % CMD_PGS;
-            if (n > CMD_PGS - in) n = CMD_PGS - in;
-            if (!lane_open[lane] || lane_wp[lane] + n > ZONE_CAP_PGS) {
-                if (!lane_open[lane]) active++;
-                lane_open[lane] = 1;
-                lane_wp[lane] = 0;
-            }
-            lane_wp[lane] += n;
-            if (lane_wp[lane] == ZONE_CAP_PGS) {
-                lane_open[lane] = 0;
-                lane_wp[lane] = 0;
-                active--;
-            }
-            p += n;
-        }
-        if (active > peak_active) peak_active = active;
-    }
-
-    free(live);
-    free(lane_wp);
-    free(lane_open);
-    free(ev);
-    if (peak_live_out) *peak_live_out = peak_live;
-    return peak_active;
-}
-
-static void zns_configure_active_zone_mux(void) {
+static void zns_configure_open_zone_mux(void) {
     REQUESTED_KSTRIPE = KSTRIPE;
-    u64 dev_limit = 0;
-    if (DEVICE_MAX_ACTIVE_ZONES && DEVICE_MAX_OPEN_ZONES)
-        dev_limit = DEVICE_MAX_ACTIVE_ZONES < DEVICE_MAX_OPEN_ZONES ? DEVICE_MAX_ACTIVE_ZONES : DEVICE_MAX_OPEN_ZONES;
-    else
-        dev_limit = DEVICE_MAX_ACTIVE_ZONES ? DEVICE_MAX_ACTIVE_ZONES : DEVICE_MAX_OPEN_ZONES;
-    ZNS_ACTIVE_ZONE_LIMIT = MAX_ACTIVE_ZONES_ARG ? MAX_ACTIVE_ZONES_ARG : dev_limit;
+    ZNS_OPEN_ZONE_LIMIT = MAX_OPEN_ZONES_ARG ? MAX_OPEN_ZONES_ARG : DEVICE_MAX_OPEN_ZONES;
+    if (!ZNS_OPEN_ZONE_LIMIT && DEVICE_MAX_ACTIVE_ZONES)
+        ZNS_OPEN_ZONE_LIMIT = DEVICE_MAX_ACTIVE_ZONES;
 
-    if (!ZNS_ACTIVE_ZONE_LIMIT) {
-        PEAK_KV_ACTIVE_ZONES = trace_peak_kv_active_zones_for_k(KSTRIPE, &PEAK_LIVE_KV_SESSIONS);
+    if (!ZNS_OPEN_ZONE_LIMIT) {
         fprintf(stderr,
-                "zns active-zone mux: mode=exclusive max_active_zones=unlimited peak_live_kv_sessions=%" PRIu64
-                " requested_k=%d effective_k=%d peak_kv_active_zones=%" PRIu64 "\n",
-                PEAK_LIVE_KV_SESSIONS, REQUESTED_KSTRIPE, KSTRIPE, PEAK_KV_ACTIVE_ZONES);
+                "zns open-zone mux: mode=exclusive max_open_zones=unlimited"
+                " requested_k=%d effective_k=%d\n",
+                REQUESTED_KSTRIPE, KSTRIPE);
         return;
     }
 
-    int best_k = 0;
-    u64 best_peak = 0, best_live = 0;
-    for (int k = KSTRIPE; k >= 1; k--) {
-        u64 live = 0;
-        u64 peak = trace_peak_kv_active_zones_for_k(k, &live);
-        if (peak + ZNS_META_ACTIVE_ZONES <= ZNS_ACTIVE_ZONE_LIMIT) {
-            best_k = k;
-            best_peak = peak;
-            best_live = live;
-            break;
-        }
-    }
-
-    if (!best_k) {
-        u64 kv_lanes = ZNS_ACTIVE_ZONE_LIMIT > ZNS_META_ACTIVE_ZONES ?
-                       ZNS_ACTIVE_ZONE_LIMIT - ZNS_META_ACTIVE_ZONES : 0;
-        if (!kv_lanes) {
-            KSTRIPE = 1;
-            PEAK_KV_ACTIVE_ZONES = trace_peak_kv_active_zones_for_k(1, &PEAK_LIVE_KV_SESSIONS);
-            fprintf(stderr,
-                    "zns active-zone limit too small: max_active_zones=%" PRIu64
-                    " metadata_reserve=%d peak_live_kv_sessions=%" PRIu64
-                    " peak_kv_active_zones_at_k1=%" PRIu64 "\n",
-                    ZNS_ACTIVE_ZONE_LIMIT, ZNS_META_ACTIVE_ZONES,
-                    PEAK_LIVE_KV_SESSIONS, PEAK_KV_ACTIVE_ZONES);
-            request_storage_stop(3, "zns_max_active_zones_too_small", 0, 0, 0, NULL);
-            return;
-        }
-        if (kv_lanes > 0x7fffffffULL) kv_lanes = 0x7fffffffULL;
-        KV_SHARED = 1;
-        KV_SHARED_LANES = (int)kv_lanes;
-        PEAK_KV_ACTIVE_ZONES = trace_peak_kv_shared_active_zones(KV_SHARED_LANES, &PEAK_LIVE_KV_SESSIONS);
+    if (ZNS_OPEN_ZONE_LIMIT <= ZNS_META_OPEN_ZONES) {
         fprintf(stderr,
-                "zns active-zone mux: mode=shared max_active_zones=%" PRIu64
-                " peak_live_kv_sessions=%" PRIu64
-                " requested_k=%d shared_kv_lanes=%d peak_kv_active_zones=%" PRIu64
-                " active_zone_bound=%" PRIu64 "\n",
-                ZNS_ACTIVE_ZONE_LIMIT, PEAK_LIVE_KV_SESSIONS, REQUESTED_KSTRIPE,
-                KV_SHARED_LANES, PEAK_KV_ACTIVE_ZONES,
-                PEAK_KV_ACTIVE_ZONES + ZNS_META_ACTIVE_ZONES);
+                "zns open-zone limit too small: max_open_zones=%" PRIu64
+                " metadata_reserve=%d\n",
+                ZNS_OPEN_ZONE_LIMIT, ZNS_META_OPEN_ZONES);
+        request_storage_stop(3, "zns_max_open_zones_too_small", 0, 0, 0, NULL);
         return;
     }
 
-    KSTRIPE = best_k;
-    PEAK_KV_ACTIVE_ZONES = best_peak;
-    PEAK_LIVE_KV_SESSIONS = best_live;
+    KV_OPEN_ZONE_LIMIT = ZNS_OPEN_ZONE_LIMIT - ZNS_META_OPEN_ZONES;
+    if (KV_OPEN_ZONE_LIMIT > 0x7fffffffULL) KV_OPEN_ZONE_LIMIT = 0x7fffffffULL;
+    KV_SHARED = 1;
+    KV_SHARED_LANES = (int)KV_OPEN_ZONE_LIMIT;
+
     fprintf(stderr,
-            "zns active-zone mux: mode=exclusive max_active_zones=%" PRIu64
-            " peak_live_kv_sessions=%" PRIu64
-            " requested_k=%d effective_k=%d peak_kv_active_zones=%" PRIu64
-            " active_zone_bound=%" PRIu64 "\n",
-            ZNS_ACTIVE_ZONE_LIMIT, PEAK_LIVE_KV_SESSIONS, REQUESTED_KSTRIPE, KSTRIPE,
-            PEAK_KV_ACTIVE_ZONES, PEAK_KV_ACTIVE_ZONES + ZNS_META_ACTIVE_ZONES);
+            "zns open-zone mux: mode=runtime-shared max_open_zones=%" PRIu64
+            " metadata_reserve=%d requested_k=%d runtime_k_max=%d kv_lanes=%d\n",
+            ZNS_OPEN_ZONE_LIMIT, ZNS_META_OPEN_ZONES, REQUESTED_KSTRIPE,
+            KV_SHARED_LANES < KSTRIPE ? KV_SHARED_LANES : KSTRIPE, KV_SHARED_LANES);
 }
 
 static void rprog_count_trace(void) {
@@ -978,9 +901,9 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
         pthread_mutex_lock(&ob->mu); ob_locked = 1;
 
         if (o->op == OP_DEL) {
-            kv_shared_delete_obj_locked(ob);
+            kv_shared_delete_obj_locked(o->obj, ob);
             pthread_mutex_unlock(&ob->mu); ob_locked = 0;
-            if (kv_shared_gc_locked(sid, op_idx, trace_ns, o) < 0) goto fail;
+            if (kv_shared_gc_locked(sid, op_idx, trace_ns, o, measure) < 0) goto fail;
             pthread_mutex_unlock(&kv_shared_mu); kv_locked = 0;
             free(ios); return 0;
         }
@@ -991,11 +914,12 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
                         " expected %" PRIu64 "\n", o->obj, o->off, ob->pgs);
                 exit(4);
             }
+            kv_shared_note_live_obj_locked(o->obj);
             for (u64 p = 0; p < o->len; ) {
                 u64 lg = o->off + p;
                 u64 j = lg / CMD_PGS, in = lg % CMD_PGS;
                 int c = (int)(j % (u64)KSTRIPE);
-                int lane = kv_shared_lane_for(o->obj, c);
+                int lane = kv_shared_lane_for_locked(o->obj, c);
                 u64 n = o->len - p;
                 u64 lane_rem = kv_shared_lane_rem_locked(lane);
                 if (n > CMD_PGS - in) n = CMD_PGS - in;
@@ -1127,7 +1051,9 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
                                 if (ml_page_zone[q] != UINT64_MAX && (int)(ml_page_zone[q] >> 32) == oz)
                                     ml_page_zone[q] = UINT64_MAX;
                             }
-                            zns_reset_zone(oz); memmove(mlz, mlz + 1, (--n_mlz) * 4);
+                            zns_reset_zone(oz);
+                            zns_note_host_gc(ZNS_HOST_GC_MEMLOG, 1, measure);
+                            memmove(mlz, mlz + 1, (--n_mlz) * 4);
                         }
                         ml_open = zns_alloc_zone();
                         if (ml_open < 0) {
@@ -1187,9 +1113,12 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
                                         ix_open_wp = 0; ixz[n_ixz++] = ix_open;
                                     }
                                     ix_zone_of[q] = ix_open; ix_slot_of[q] = ix_open_wp; zn_live[ix_open]++;
-                                    pio(1, (u64)ix_open * ZONE_PGS + ix_open_wp, 1); ix_open_wp++;
+                                    pio(1, (u64)ix_open * ZONE_PGS + ix_open_wp, 1);
+                                    zns_note_host_copy_pages(1, measure);
+                                    ix_open_wp++;
                                 }
                                 zn_live[vz] = 0; zns_reset_zone(vz);
+                                zns_note_host_gc(ZNS_HOST_GC_INDEX, 1, measure);
                                 memmove(&ixz[vi], &ixz[vi + 1], (n_ixz - vi - 1) * 4); n_ixz--;
                             }
                         }
@@ -1209,6 +1138,7 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
         dur = burst(wr, ios, nio, wr ? 1 : QD, measure ? cls : -1);
     }
 acct:
+    if (MODE_ZNS && wr) zns_note_user_write_pages(o->len, measure);
     if (o->op == OP_WKV && measure) lv_add(C_KVWR_OP, dur);
     if (o->op == OP_RKV && measure) lv_add(C_KVRD_OP, dur);
     if (o->op == OP_RKV && measure) lv_add(C_RESUME, dur);
@@ -1259,15 +1189,59 @@ static int write_outputs(const char *outp, const char *dev) {
 
     fprintf(out, "mode=%s tscale=%.3f qd=%d device=%s\n", MODE_ZNS ? "zns" : "conv", TSCALE, QD, dev);
     if (MODE_ZNS) {
+        u64 user_wr_pgs = rprog_atomic_read_u64(&ZNS_USER_WRITE_PAGES);
+        u64 host_copy_pgs = rprog_atomic_read_u64(&ZNS_HOST_COPY_PAGES);
+        u64 host_write_pgs = user_wr_pgs + host_copy_pgs;
+        u64 total_user_wr_pgs = rprog_atomic_read_u64(&ZNS_TOTAL_USER_WRITE_PAGES);
+        u64 total_host_copy_pgs = rprog_atomic_read_u64(&ZNS_TOTAL_HOST_COPY_PAGES);
+        u64 total_host_write_pgs = total_user_wr_pgs + total_host_copy_pgs;
+        double waf = user_wr_pgs ? (double)host_write_pgs / (double)user_wr_pgs : 0.0;
+        double total_waf = total_user_wr_pgs ?
+            (double)total_host_write_pgs / (double)total_user_wr_pgs : 0.0;
+
         fprintf(out,
-                "ZNS_ACTIVE_MUX mode=%s max_active_zones=%" PRIu64
-                " requested_k=%d effective_k=%d shared_kv_lanes=%d peak_live_kv_sessions=%" PRIu64
-                " peak_kv_active_zones=%" PRIu64
-                " metadata_active_reserve=%d active_zone_bound=%" PRIu64 "\n",
-                KV_SHARED ? "shared" : "exclusive", ZNS_ACTIVE_ZONE_LIMIT,
-                REQUESTED_KSTRIPE, KSTRIPE, KV_SHARED_LANES,
-                PEAK_LIVE_KV_SESSIONS, PEAK_KV_ACTIVE_ZONES, ZNS_META_ACTIVE_ZONES,
-                PEAK_KV_ACTIVE_ZONES + ZNS_META_ACTIVE_ZONES);
+                "ZNS_OPEN_MUX mode=%s max_open_zones=%" PRIu64
+                " requested_k=%d runtime_k_max=%d shared_kv_lanes=%d"
+                " observed_peak_live_kv_sessions=%" PRIu64
+                " observed_peak_kv_open_zones=%" PRIu64
+                " metadata_open_reserve=%d open_zone_bound=%" PRIu64 "\n",
+                KV_SHARED ? "runtime-shared" : "exclusive", ZNS_OPEN_ZONE_LIMIT,
+                REQUESTED_KSTRIPE,
+                KV_SHARED && KV_SHARED_LANES < KSTRIPE ? KV_SHARED_LANES : KSTRIPE,
+                KV_SHARED_LANES, PEAK_LIVE_KV_SESSIONS, PEAK_KV_OPEN_ZONES,
+                ZNS_META_OPEN_ZONES,
+                PEAK_KV_OPEN_ZONES + ZNS_META_OPEN_ZONES);
+        fprintf(out,
+                "ZNS_HOST_GC host_gc_count=%" PRIu64
+                " host_gc_kv_count=%" PRIu64
+                " host_gc_index_count=%" PRIu64
+                " host_gc_memlog_count=%" PRIu64
+                " host_gc_reset_zones=%" PRIu64
+                " total_run_host_gc_count=%" PRIu64
+                " total_run_host_gc_kv_count=%" PRIu64
+                " total_run_host_gc_index_count=%" PRIu64
+                " total_run_host_gc_memlog_count=%" PRIu64
+                " total_run_host_gc_reset_zones=%" PRIu64 "\n",
+                rprog_atomic_read_u64(&ZNS_HOST_GC_COUNT),
+                rprog_atomic_read_u64(&ZNS_HOST_GC_KV_COUNT),
+                rprog_atomic_read_u64(&ZNS_HOST_GC_INDEX_COUNT),
+                rprog_atomic_read_u64(&ZNS_HOST_GC_MEMLOG_COUNT),
+                rprog_atomic_read_u64(&ZNS_HOST_GC_RESET_ZONES),
+                rprog_atomic_read_u64(&ZNS_TOTAL_HOST_GC_COUNT),
+                rprog_atomic_read_u64(&ZNS_TOTAL_HOST_GC_KV_COUNT),
+                rprog_atomic_read_u64(&ZNS_TOTAL_HOST_GC_INDEX_COUNT),
+                rprog_atomic_read_u64(&ZNS_TOTAL_HOST_GC_MEMLOG_COUNT),
+                rprog_atomic_read_u64(&ZNS_TOTAL_HOST_GC_RESET_ZONES));
+        fprintf(out,
+                "user_wr_pgs=%" PRIu64
+                " host_copy_pgs=%" PRIu64
+                " host_write_pgs=%" PRIu64
+                " total_run_user_wr_pgs=%" PRIu64
+                " total_run_host_copy_pgs=%" PRIu64
+                " total_run_host_write_pgs=%" PRIu64 "\n",
+                user_wr_pgs, host_copy_pgs, host_write_pgs,
+                total_user_wr_pgs, total_host_copy_pgs, total_host_write_pgs);
+        fprintf(out, "WAF=%.4f total_run_WAF=%.4f\n", waf, total_waf);
     }
     pthread_mutex_lock(&stop_mu);
     if (STOP_INFO.active) {
@@ -1316,14 +1290,14 @@ int main(int argc, char **argv) {
             RPROG_INTERVAL = strtoull(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--no-progress")) RPROG_INTERVAL = 0;
         else if (!strcmp(argv[i], "--max-active-zones") || !strcmp(argv[i], "--max-open-zones") || !strcmp(argv[i], "-A"))
-            MAX_ACTIVE_ZONES_ARG = strtoull(argv[++i], NULL, 10);
+            MAX_OPEN_ZONES_ARG = strtoull(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "-k")) { 
             KSTRIPE = atoi(argv[++i]);
             if (KSTRIPE < 1) KSTRIPE = 1; 
             if (KSTRIPE > MAXK) KSTRIPE = MAXK; 
         }
     }
-    if (!tracef || !dev) { fprintf(stderr, "usage: replayer -t trace -d /dev/nvmeXnY -m conv|zns -o out [-s scale] [-q qd] [-k kv_stripes] [-A max_active_or_open_zones] [--progress-interval n] [--no-progress]\n"); return 1; }
+    if (!tracef || !dev) { fprintf(stderr, "usage: replayer -t trace -d /dev/nvmeXnY -m conv|zns -o out [-s scale] [-q qd] [-k kv_stripes] [-A max_open_zones] [--progress-interval n] [--no-progress]\n"); return 1; }
     TRACE_PATH = tracef;
     for (int c = 0; c < NCLS; c++) pthread_mutex_init(&LAT[c].mu, NULL);
     load_trace(tracef);
@@ -1369,7 +1343,7 @@ int main(int argc, char **argv) {
         read_u64_file(sysp, &DEVICE_MAX_ACTIVE_ZONES);
         snprintf(sysp, sizeof sysp, "/sys/block/%s/queue/max_open_zones", base);
         read_u64_file(sysp, &DEVICE_MAX_OPEN_ZONES);
-        zns_configure_active_zone_mux();
+        zns_configure_open_zone_mux();
         zfree = malloc(N_ZONES * 4);
         for (u64 i = 0; i < N_ZONES; i++) zfree[i] = (int)i;
         zf_head = 0; zf_tail = 0; zf_cnt = N_ZONES; zf_tail = N_ZONES;
@@ -1378,7 +1352,10 @@ int main(int argc, char **argv) {
             kv_lane_wp = calloc((size_t)KV_SHARED_LANES, sizeof(*kv_lane_wp));
             kv_zone_live = calloc(N_ZONES, sizeof(*kv_zone_live));
             kv_zone_used = calloc(N_ZONES, 1);
+            kv_obj_slot = malloc((size_t)(n_objs + 2) * sizeof(*kv_obj_slot));
+            kv_active_obj = malloc((size_t)(n_objs + 2) * sizeof(*kv_active_obj));
             for (int i = 0; i < KV_SHARED_LANES; i++) kv_lane_zone[i] = -1;
+            for (u64 i = 0; i < n_objs + 2; i++) kv_obj_slot[i] = -1;
         }
         ix_zone_of = malloc(IX_PGS * 4); ix_slot_of = malloc(IX_PGS * 4);
         for (u64 i = 0; i < IX_PGS; i++) ix_zone_of[i] = -1;

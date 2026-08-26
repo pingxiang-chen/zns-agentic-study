@@ -6,6 +6,19 @@ COMMIT=61c90f7758cbd9545b4a4727e89377bf88eab060
 [ ! -d nvmevirt ] && git clone https://github.com/snu-csl/nvmevirt.git \
     && cd nvmevirt && git checkout "$COMMIT" && cd ..
 
+apply_nvmevirt_patch() {
+    local patch_file=$1
+
+    if grep -q "conv_ftl_stats" nvmevirt/main.c; then
+        echo "patch already applied: $patch_file"
+        return 0
+    fi
+
+    patch --batch --forward --no-backup-if-mismatch -d nvmevirt -p1 < "$patch_file"
+}
+
+apply_nvmevirt_patch patches/0001-conv-ftl-gc-waf-stats.patch
+
 build_variant() {   # $1 = conv|zns
     local v=$1
     rsync -av --delete nvmevirt/ build_$v/

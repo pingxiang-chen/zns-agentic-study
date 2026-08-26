@@ -1,0 +1,242 @@
+--- a/conv_ftl.h
++++ b/conv_ftl.h
+@@ -3,10 +3,13 @@
+ #ifndef _NVMEVIRT_CONV_FTL_H
+ #define _NVMEVIRT_CONV_FTL_H
+ 
++#include <linux/atomic.h>
+ #include <linux/types.h>
+ #include "pqueue/pqueue.h"
+ #include "ssd_config.h"
+ #include "ssd.h"
++
++struct seq_file;
+ 
+ struct convparams {
+ 	uint32_t gc_thres_lines;
+@@ -55,6 +58,14 @@
+ 	uint32_t credits_to_refill;
+ };
+ 
++struct conv_ftl_stats {
++	atomic64_t host_write_pages;
++	atomic64_t gc_read_pages;
++	atomic64_t gc_write_pages;
++	atomic64_t gc_count;
++	atomic64_t gc_erase_count;
++};
++
+ struct conv_ftl {
+ 	struct ssd *ssd;
+ 
+@@ -65,6 +76,7 @@
+ 	struct write_pointer gc_wp;
+ 	struct line_mgmt lm;
+ 	struct write_flow_control wfc;
++	struct conv_ftl_stats stats;
+ };
+ 
+ void conv_init_namespace(struct nvmev_ns *ns, uint32_t id, uint64_t size, void *mapped_addr,
+@@ -75,4 +87,7 @@
+ bool conv_proc_nvme_io_cmd(struct nvmev_ns *ns, struct nvmev_request *req,
+ 			   struct nvmev_result *ret);
+ 
++void conv_print_stats(struct seq_file *m, struct nvmev_ns *ns);
++void conv_reset_stats(struct nvmev_ns *ns);
++
+ #endif
+--- a/conv_ftl.c
++++ b/conv_ftl.c
+@@ -2,7 +2,9 @@
+ 
+ #include <linux/vmalloc.h>
+ #include <linux/ktime.h>
++#include <linux/math64.h>
+ #include <linux/sched/clock.h>
++#include <linux/seq_file.h>
+ 
+ #include "nvmev.h"
+ #include "conv_ftl.h"
+@@ -158,6 +160,64 @@
+ 
+ 	wfc->write_credits = spp->pgs_per_line;
+ 	wfc->credits_to_refill = spp->pgs_per_line;
++}
++
++static void conv_reset_ftl_stats(struct conv_ftl *conv_ftl)
++{
++	atomic64_set(&conv_ftl->stats.host_write_pages, 0);
++	atomic64_set(&conv_ftl->stats.gc_read_pages, 0);
++	atomic64_set(&conv_ftl->stats.gc_write_pages, 0);
++	atomic64_set(&conv_ftl->stats.gc_count, 0);
++	atomic64_set(&conv_ftl->stats.gc_erase_count, 0);
++}
++
++void conv_reset_stats(struct nvmev_ns *ns)
++{
++	struct conv_ftl *conv_ftls = (struct conv_ftl *)ns->ftls;
++	uint32_t i;
++
++	if (!conv_ftls)
++		return;
++
++	for (i = 0; i < ns->nr_parts; i++)
++		conv_reset_ftl_stats(&conv_ftls[i]);
++}
++
++void conv_print_stats(struct seq_file *m, struct nvmev_ns *ns)
++{
++	struct conv_ftl *conv_ftls = (struct conv_ftl *)ns->ftls;
++	unsigned long long host_write_pages = 0;
++	unsigned long long gc_read_pages = 0;
++	unsigned long long gc_write_pages = 0;
++	unsigned long long gc_count = 0;
++	unsigned long long gc_erase_count = 0;
++	unsigned long long nand_write_pages;
++	unsigned long long waf_x1000 = 0;
++	uint32_t i;
++
++	if (!conv_ftls)
++		return;
++
++	for (i = 0; i < ns->nr_parts; i++) {
++		host_write_pages += atomic64_read(&conv_ftls[i].stats.host_write_pages);
++		gc_read_pages += atomic64_read(&conv_ftls[i].stats.gc_read_pages);
++		gc_write_pages += atomic64_read(&conv_ftls[i].stats.gc_write_pages);
++		gc_count += atomic64_read(&conv_ftls[i].stats.gc_count);
++		gc_erase_count += atomic64_read(&conv_ftls[i].stats.gc_erase_count);
++	}
++
++	nand_write_pages = host_write_pages + gc_write_pages;
++	if (host_write_pages)
++		waf_x1000 = div64_u64(nand_write_pages * 1000, host_write_pages);
++
++	seq_printf(m,
++		   "conv_ftl ns=%u page_size_bytes=%u gc_count=%llu gc_erase_count=%llu "
++		   "host_write_pages=%llu gc_read_pages=%llu gc_write_pages=%llu "
++		   "nand_write_pages=%llu waf=%llu.%03llu\n",
++		   ns->id, (unsigned int)conv_ftls[0].ssd->sp.pgsz, gc_count, gc_erase_count,
++		   host_write_pages, gc_read_pages, gc_write_pages, nand_write_pages,
++		   waf_x1000 / 1000,
++		   waf_x1000 % 1000);
+ }
+ 
+ static inline void check_addr(int a, int max)
+@@ -350,6 +410,7 @@
+ 	prepare_write_pointer(conv_ftl, GC_IO);
+ 
+ 	init_write_flow_control(conv_ftl);
++	conv_reset_ftl_stats(conv_ftl);
+ 
+ 	NVMEV_INFO("Init FTL instance with %d channels (%ld pages)\n", conv_ftl->ssd->sp.nchs,
+ 		   conv_ftl->ssd->sp.tt_pgs);
+@@ -610,6 +671,7 @@
+ 	set_rmap_ent(conv_ftl, lpn, &new_ppa);
+ 
+ 	mark_page_valid(conv_ftl, &new_ppa);
++	atomic64_inc(&conv_ftl->stats.gc_write_pages);
+ 
+ 	/* need to advance the write pointer here */
+ 	advance_write_pointer(conv_ftl, GC_IO);
+@@ -714,6 +776,8 @@
+ 	if (cnt <= 0)
+ 		return;
+ 
++	atomic64_add(cnt, &conv_ftl->stats.gc_read_pages);
++
+ 	if (cpp->enable_gc_delay) {
+ 		struct nand_cmd gcr = {
+ 			.type = GC_IO,
+@@ -763,6 +827,7 @@
+ 	}
+ 
+ 	ppa.g.blk = victim_line->id;
++	atomic64_inc(&conv_ftl->stats.gc_count);
+ 	NVMEV_DEBUG_VERBOSE("GC-ing line:%d,ipc=%d(%d),victim=%d,full=%d,free=%d\n", ppa.g.blk,
+ 		    victim_line->ipc, victim_line->vpc, conv_ftl->lm.victim_line_cnt,
+ 		    conv_ftl->lm.full_line_cnt, conv_ftl->lm.free_line_cnt);
+@@ -788,6 +853,7 @@
+ 					struct convparams *cpp = &conv_ftl->cp;
+ 
+ 					mark_block_free(conv_ftl, &ppa);
++					atomic64_inc(&conv_ftl->stats.gc_erase_count);
+ 
+ 					if (cpp->enable_gc_delay) {
+ 						struct nand_cmd gce = {
+@@ -993,6 +1059,7 @@
+ 		set_rmap_ent(conv_ftl, local_lpn, &ppa);
+ 
+ 		mark_page_valid(conv_ftl, &ppa);
++		atomic64_inc(&conv_ftl->stats.host_write_pages);
+ 
+ 		/* need to advance the write pointer here */
+ 		advance_write_pointer(conv_ftl, USER_IO);
+--- a/nvmev.h
++++ b/nvmev.h
+@@ -259,6 +259,7 @@
+ 	struct proc_dir_entry *proc_io_units;
+ 	struct proc_dir_entry *proc_stat;
+ 	struct proc_dir_entry *proc_debug;
++	struct proc_dir_entry *proc_conv_ftl_stats;
+ 
+ 	unsigned long long *io_unit_stat;
+ };
+--- a/main.c
++++ b/main.c
+@@ -350,6 +350,17 @@
+ 		}
+ 		seq_printf(m, "total: %u %u %u %llu\n", nr_in_flight, nr_dispatch, nr_dispatched,
+ 			   total_io);
++	} else if (strcmp(filename, "conv_ftl_stats") == 0) {
++#if SUPPORTED_SSD_TYPE(CONV)
++		int i;
++
++		if (nvmev_vdev->ns) {
++			for (i = 0; i < nvmev_vdev->nr_ns; i++) {
++				if (NS_SSD_TYPE(i) == SSD_TYPE_CONV)
++					conv_print_stats(m, &nvmev_vdev->ns[i]);
++			}
++		}
++#endif
+ 	} else if (strcmp(filename, "debug") == 0) {
+ 		/* Left for later use */
+ 	}
+@@ -400,6 +411,17 @@
+ 
+ 			memset(&sq->stat, 0x00, sizeof(sq->stat));
+ 		}
++	} else if (!strcmp(filename, "conv_ftl_stats")) {
++#if SUPPORTED_SSD_TYPE(CONV)
++		int i;
++
++		if (nvmev_vdev->ns) {
++			for (i = 0; i < nvmev_vdev->nr_ns; i++) {
++				if (NS_SSD_TYPE(i) == SSD_TYPE_CONV)
++					conv_reset_stats(&nvmev_vdev->ns[i]);
++			}
++		}
++#endif
+ 	} else if (!strcmp(filename, "debug")) {
+ 		/* Left for later use */
+ 	}
+@@ -458,6 +480,10 @@
+ 		proc_create("io_units", 0664, nvmev_vdev->proc_root, &proc_file_fops);
+ 	nvmev_vdev->proc_stat = proc_create("stat", 0444, nvmev_vdev->proc_root, &proc_file_fops);
+ 	nvmev_vdev->proc_debug = proc_create("debug", 0444, nvmev_vdev->proc_root, &proc_file_fops);
++#if SUPPORTED_SSD_TYPE(CONV)
++	nvmev_vdev->proc_conv_ftl_stats =
++		proc_create("conv_ftl_stats", 0664, nvmev_vdev->proc_root, &proc_file_fops);
++#endif
+ }
+ 
+ static void NVMEV_STORAGE_FINAL(struct nvmev_dev *nvmev_vdev)
+@@ -467,6 +493,9 @@
+ 	remove_proc_entry("io_units", nvmev_vdev->proc_root);
+ 	remove_proc_entry("stat", nvmev_vdev->proc_root);
+ 	remove_proc_entry("debug", nvmev_vdev->proc_root);
++#if SUPPORTED_SSD_TYPE(CONV)
++	remove_proc_entry("conv_ftl_stats", nvmev_vdev->proc_root);
++#endif
+ 
+ 	remove_proc_entry("nvmev", NULL);
+ 

@@ -23,6 +23,8 @@ SCALE="0.25"
 OUTPUT=""
 LOAD_SIZE=""
 STAT_FILE=""
+CONV_FTL_STATS_FILE=""
+CONV_FTL_STATS_PID=""
 
 usage() {
     cat <<EOF
@@ -99,6 +101,43 @@ save_block_stats() {
         join_csv "${field_values[@]}"
     } > "$STAT_FILE"
 }
+
+start_conv_ftl_stats_sampler() {
+    local stats_path="/proc/nvmev/conv_ftl_stats"
+
+    if [[ "$MODE" != "conv" ]]; then
+        return 0
+    fi
+
+    CONV_FTL_STATS_FILE="${OUTPUT}_conv_ftl_stats.txt"
+
+    if [[ ! -r "$stats_path" ]]; then
+        echo "Error: cannot read $stats_path. Rebuild/reload conventional NVMeVirt with GC/WAF stats enabled." >&2
+        return 1
+    fi
+
+    : > "$CONV_FTL_STATS_FILE"
+    (
+        while true; do
+            printf 'timestamp=%s\n' "$(date '+%Y-%m-%d:%H:%M:%S')"
+            cat "$stats_path"
+            sleep 5
+        done
+    ) > "$CONV_FTL_STATS_FILE" &
+    CONV_FTL_STATS_PID=$!
+
+    echo "Sampling conventional FTL stats every 5 seconds: $CONV_FTL_STATS_FILE"
+}
+
+stop_conv_ftl_stats_sampler() {
+    if [[ -n "$CONV_FTL_STATS_PID" ]]; then
+        kill "$CONV_FTL_STATS_PID" 2>/dev/null || true
+        wait "$CONV_FTL_STATS_PID" 2>/dev/null || true
+        CONV_FTL_STATS_PID=""
+    fi
+}
+
+trap stop_conv_ftl_stats_sampler EXIT
 
 # -----------------------------
 # Parse key=value arguments
@@ -316,10 +355,14 @@ echo "Running:"
 printf ' %q' "${REPLAYER_COMMAND[@]}"
 echo
 
+start_conv_ftl_stats_sampler
+
 set +e
 "${REPLAYER_COMMAND[@]}" > "${OUTPUT}_log.txt" 2>&1
 REPLAYER_STATUS=$?
 set -e
+
+stop_conv_ftl_stats_sampler
 
 echo
 
@@ -333,6 +376,9 @@ else
     echo "See ${OUTPUT}_log.txt and ${OUTPUT}_summary.txt."
 fi
 echo "Device information: $INFO_FILE"
+if [[ -n "$CONV_FTL_STATS_FILE" ]]; then
+    echo "Conv FTL stats:      $CONV_FTL_STATS_FILE"
+fi
 echo "Replay output:       $OUTPUT"
 
 chown $SUDO_USER:$SUDO_USER *$OUTPUT*.csv
