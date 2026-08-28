@@ -11,6 +11,7 @@
  *     limit, or runtime-multiplexed KV lanes when max_open_zones is bounded.
  *   - FIFO memlog zones, log-structured index zones with host compaction;
  *     DELETE issues BLKRESETZONE.
+ *   - host-managed GC event counters are printed to stderr every 5 seconds.
  *   - intra-zone writes at QD1 (write-pointer rule); reads at full QD.
  *
  * I/O: O_DIRECT, 128 KiB commands, per-burst QD via POSIX AIO (portable;
@@ -284,6 +285,7 @@ static u64 RPROG_ISSUED_OPS, RPROG_ISSUED_LOG_WRITES, RPROG_ISSUED_LOG_PAGES;
 static pthread_mutex_t rprog_mu = PTHREAD_MUTEX_INITIALIZER;
 
 enum { ZNS_HOST_GC_KV = 0, ZNS_HOST_GC_INDEX = 1, ZNS_HOST_GC_MEMLOG = 2 };
+#define ZNS_HOST_GC_EVENT_INTERVAL_NS (5ULL * 1000000000ULL)
 static u64 ZNS_USER_WRITE_PAGES, ZNS_TOTAL_USER_WRITE_PAGES;
 static u64 ZNS_HOST_COPY_PAGES, ZNS_TOTAL_HOST_COPY_PAGES;
 static u64 ZNS_HOST_GC_COUNT, ZNS_TOTAL_HOST_GC_COUNT;
@@ -291,6 +293,8 @@ static u64 ZNS_HOST_GC_KV_COUNT, ZNS_TOTAL_HOST_GC_KV_COUNT;
 static u64 ZNS_HOST_GC_INDEX_COUNT, ZNS_TOTAL_HOST_GC_INDEX_COUNT;
 static u64 ZNS_HOST_GC_MEMLOG_COUNT, ZNS_TOTAL_HOST_GC_MEMLOG_COUNT;
 static u64 ZNS_HOST_GC_RESET_ZONES, ZNS_TOTAL_HOST_GC_RESET_ZONES;
+static pthread_t ZNS_HOST_GC_EVENT_THREAD;
+static int ZNS_HOST_GC_EVENT_THREAD_STARTED, ZNS_HOST_GC_EVENT_STOP;
 
 static void zns_count_pages(u64 *measured, u64 *total, u64 pages, int measure) {
     if (!MODE_ZNS || !pages) return;
@@ -658,6 +662,121 @@ static void kv_shared_delete_obj_locked(u32 obj, obj_t *ob) {
 
 static u64 rprog_atomic_read_u64(u64 *v) {
     return __sync_add_and_fetch(v, 0);
+}
+
+typedef struct {
+    u64 sample_ns;
+    u64 host_gc_count;
+    u64 host_gc_kv_count;
+    u64 host_gc_index_count;
+    u64 host_gc_memlog_count;
+    u64 host_gc_reset_zones;
+    u64 host_copy_pages;
+} zns_host_gc_event_sample_t;
+
+static void zns_host_gc_event_sample(zns_host_gc_event_sample_t *s) {
+    s->sample_ns = now_ns();
+    s->host_gc_count = rprog_atomic_read_u64(&ZNS_TOTAL_HOST_GC_COUNT);
+    s->host_gc_kv_count = rprog_atomic_read_u64(&ZNS_TOTAL_HOST_GC_KV_COUNT);
+    s->host_gc_index_count = rprog_atomic_read_u64(&ZNS_TOTAL_HOST_GC_INDEX_COUNT);
+    s->host_gc_memlog_count = rprog_atomic_read_u64(&ZNS_TOTAL_HOST_GC_MEMLOG_COUNT);
+    s->host_gc_reset_zones = rprog_atomic_read_u64(&ZNS_TOTAL_HOST_GC_RESET_ZONES);
+    s->host_copy_pages = rprog_atomic_read_u64(&ZNS_TOTAL_HOST_COPY_PAGES);
+}
+
+static u64 zns_host_gc_event_delta(u64 now, u64 prev) {
+    return now >= prev ? now - prev : 0;
+}
+
+static int zns_host_gc_event_stop_requested(void) {
+    return __sync_add_and_fetch(&ZNS_HOST_GC_EVENT_STOP, 0);
+}
+
+static int zns_host_gc_event_sleep_until(u64 target_ns) {
+    for (;;) {
+        if (zns_host_gc_event_stop_requested()) return 0;
+        u64 now = now_ns();
+        if (now >= target_ns) return 1;
+        u64 wait = target_ns - now;
+        if (wait > 100000000ULL) wait = 100000000ULL;
+        struct timespec ts = { wait / 1000000000ULL, wait % 1000000000ULL };
+        nanosleep(&ts, NULL);
+    }
+}
+
+static void zns_host_gc_event_emit(const char *tag,
+                                   const zns_host_gc_event_sample_t *prev,
+                                   const zns_host_gc_event_sample_t *cur) {
+    double elapsed = T0 && cur->sample_ns >= T0 ? (cur->sample_ns - T0) / 1000000000.0 : 0.0;
+    double window = cur->sample_ns >= prev->sample_ns ?
+        (cur->sample_ns - prev->sample_ns) / 1000000000.0 : 0.0;
+    u64 count_delta = zns_host_gc_event_delta(cur->host_gc_count, prev->host_gc_count);
+    u64 kv_delta = zns_host_gc_event_delta(cur->host_gc_kv_count, prev->host_gc_kv_count);
+    u64 index_delta = zns_host_gc_event_delta(cur->host_gc_index_count, prev->host_gc_index_count);
+    u64 memlog_delta = zns_host_gc_event_delta(cur->host_gc_memlog_count, prev->host_gc_memlog_count);
+    u64 reset_delta = zns_host_gc_event_delta(cur->host_gc_reset_zones, prev->host_gc_reset_zones);
+    u64 copy_delta = zns_host_gc_event_delta(cur->host_copy_pages, prev->host_copy_pages);
+
+    pthread_mutex_lock(&rprog_mu);
+    fprintf(stderr,
+            "ZNS_HOST_MANAGEMENT_GC_EVENT[%s]: elapsed_s=%.3f window_s=%.3f"
+            " host_gc_count_delta=%" PRIu64
+            " host_gc_kv_count_delta=%" PRIu64
+            " host_gc_index_count_delta=%" PRIu64
+            " host_gc_memlog_count_delta=%" PRIu64
+            " host_gc_reset_zones_delta=%" PRIu64
+            " host_copy_pgs_delta=%" PRIu64
+            " total_run_host_gc_count=%" PRIu64
+            " total_run_host_gc_kv_count=%" PRIu64
+            " total_run_host_gc_index_count=%" PRIu64
+            " total_run_host_gc_memlog_count=%" PRIu64
+            " total_run_host_gc_reset_zones=%" PRIu64
+            " total_run_host_copy_pgs=%" PRIu64 "\n",
+            tag, elapsed, window, count_delta, kv_delta, index_delta, memlog_delta,
+            reset_delta, copy_delta, cur->host_gc_count, cur->host_gc_kv_count,
+            cur->host_gc_index_count, cur->host_gc_memlog_count,
+            cur->host_gc_reset_zones, cur->host_copy_pages);
+    pthread_mutex_unlock(&rprog_mu);
+}
+
+static void *zns_host_gc_event_thread(void *arg) {
+    (void)arg;
+    zns_host_gc_event_sample_t prev, cur;
+    zns_host_gc_event_sample(&prev);
+    u64 next_emit_ns = now_ns() + ZNS_HOST_GC_EVENT_INTERVAL_NS;
+
+    while (zns_host_gc_event_sleep_until(next_emit_ns)) {
+        zns_host_gc_event_sample(&cur);
+        zns_host_gc_event_emit("interval", &prev, &cur);
+        prev = cur;
+        next_emit_ns += ZNS_HOST_GC_EVENT_INTERVAL_NS;
+        if (next_emit_ns <= now_ns())
+            next_emit_ns = now_ns() + ZNS_HOST_GC_EVENT_INTERVAL_NS;
+    }
+
+    zns_host_gc_event_sample(&cur);
+    if (cur.host_gc_count != prev.host_gc_count ||
+        cur.host_gc_reset_zones != prev.host_gc_reset_zones ||
+        cur.host_copy_pages != prev.host_copy_pages)
+        zns_host_gc_event_emit("final", &prev, &cur);
+    return NULL;
+}
+
+static void zns_host_gc_event_start(void) {
+    if (!MODE_ZNS || !RPROG_INTERVAL) return;
+    ZNS_HOST_GC_EVENT_STOP = 0;
+    if (pthread_create(&ZNS_HOST_GC_EVENT_THREAD, NULL, zns_host_gc_event_thread, NULL) == 0) {
+        ZNS_HOST_GC_EVENT_THREAD_STARTED = 1;
+    } else {
+        perror("pthread_create zns host gc event monitor");
+    }
+}
+
+static void zns_host_gc_event_stop(void) {
+    if (!ZNS_HOST_GC_EVENT_THREAD_STARTED) return;
+    __sync_lock_test_and_set(&ZNS_HOST_GC_EVENT_STOP, 1);
+    pthread_join(ZNS_HOST_GC_EVENT_THREAD, NULL);
+    ZNS_HOST_GC_EVENT_THREAD_STARTED = 0;
 }
 
 static void load_trace(const char *path) {
@@ -1374,10 +1493,12 @@ int main(int argc, char **argv) {
 
     if (!stop_requested()) {
         T0 = now_ns();
+        zns_host_gc_event_start();
         pthread_t *th = malloc(n_sess * sizeof(pthread_t));
         for (u32 s = 0; s < n_sess; s++) pthread_create(&th[s], NULL, sess_thread, (void *)(uintptr_t)s);
         for (u32 s = 0; s < n_sess; s++) pthread_join(th[s], NULL);
         free(th);
+        zns_host_gc_event_stop();
     }
     rprog_finish();
 

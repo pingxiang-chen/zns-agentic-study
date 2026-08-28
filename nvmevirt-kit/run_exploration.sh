@@ -1,7 +1,10 @@
 #!/bin/bash
 
-TRACE="../traces/tr_occ90.txt"
+TRACE="../traces/nvme_occ90.txt"
 SCALE="1"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+RESULT_DIR="${RESULT_DIR:-$REPO_ROOT/results}"
 
 # Check if effective user ID is 0
 if [ "$(id -u)" -ne 0 ]; then
@@ -9,9 +12,52 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
+trace_output_dir() {
+    local trace_file
+    local trace_prefix
+
+    trace_file="$(basename -- "$1")"
+    trace_prefix="${trace_file%.*}"
+
+    if [ -z "$trace_prefix" ] || [ "$trace_prefix" = "$trace_file" ]; then
+        trace_prefix="$trace_file"
+    fi
+
+    printf "%s\n" "$trace_prefix"
+}
+
+archive_outputs_for_trace() {
+    local out_dir
+    local -a outputs
+
+    out_dir="$(trace_output_dir "$TRACE")"
+
+    out_dir="$RESULT_DIR/$out_dir"
+
+    echo $out_dir
+
+    mkdir -p "$out_dir"
+
+    shopt -s nullglob
+    outputs=( *.csv *.txt )
+    shopt -u nullglob
+
+    if [ "${#outputs[@]}" -gt 0 ]; then
+        mv -- "${outputs[@]}" "$out_dir"/
+    fi
+
+    if [ -n "${SUDO_UID:-}" ] && [ -n "${SUDO_GID:-}" ]; then
+        chown -R "$SUDO_UID:$SUDO_GID" "$out_dir"
+    elif [ -n "${SUDO_USER:-}" ]; then
+        chown -R "$SUDO_USER:$SUDO_USER" "$out_dir"
+    fi
+}
+
 for (( k=1; k<=16; k*=2 ))
 do 
    ./run_experiment.sh mode=zns size=40GiB k=$k trace=$TRACE scale=$SCALE
 done
 
 ./run_experiment.sh mode=conv size=40GiB trace=$TRACE scale=$SCALE
+
+archive_outputs_for_trace

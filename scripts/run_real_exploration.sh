@@ -1,7 +1,7 @@
 #!/bin/bash
 
 TRACE="../traces/tr_occ90.txt"
-SCALE="0.25"
+SCALE="1"
 
 # Check if effective user ID is 0
 if [ "$(id -u)" -ne 0 ]; then

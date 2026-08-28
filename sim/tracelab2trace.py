@@ -26,7 +26,8 @@ import argparse, csv, json, math, random, sys
 from collections import defaultdict
 
 PG = 4096
-TT_PGS = 256 * 256 * 64
+GiB = 1073741824
+TT_PGS = int((40 * GiB) / PG)  # nvmevirt default geometry: 40 GiB raw
 S = 1_000_000_000
 
 ap = argparse.ArgumentParser()

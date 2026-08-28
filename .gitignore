@@ -7,7 +7,13 @@ nvmevirt-kit/*.txt
 nvmevirt-kit/*.csv
 nvmevirt-kit/results/*
 traces/*.txt
+traces/*.json
+traces/mooncake-fast25
+traces/azure-llm-inference-2023
+traces/burstgpt
+traces/tracelab
 results/*
 figs/*
 scripts/*.csv
 scripts/*.txt
+sim/__pycache__
