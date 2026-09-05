@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TRACE="../traces/tr_occ90.txt"
+TRACE="../traces/nvme_occ90.txt"
 SCALE="1"
 
 # Check if effective user ID is 0
@@ -11,5 +11,5 @@ fi
 
 for (( k=1; k<=8; k*=2 ))
 do 
-    ./run_real_experiment.sh mode=zns device=/dev/nvme0n1 k=$k confirm=YES_I_UNDERSTAND trace=$TRACE scale=$SCALE
+    ./run_real_experiment.sh mode=zns device=/dev/nvme1n1 k=$k confirm=YES_I_UNDERSTAND trace=$TRACE scale=$SCALE
 done

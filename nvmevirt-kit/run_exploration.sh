@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TRACE="../traces/nvme_occ90.txt"
+TRACE="../traces/tr_tlw.txt"
 SCALE="1"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"

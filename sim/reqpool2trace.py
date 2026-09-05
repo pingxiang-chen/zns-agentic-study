@@ -22,7 +22,7 @@ from datetime import datetime
 
 PG = 4096
 GiB = 1073741824
-TT_PGS = int((40 * GiB) / PG)  # nvmevirt default geometry: 40 GiB raw
+TT_PGS = int(( 8 * GiB) / PG)  # nvmevirt default geometry: 16 GiB raw
 S = 1_000_000_000
 PGTOK = 8
 

@@ -6,7 +6,8 @@ Claude Code session trace.
 
 Realism sources (all from the released artifacts):
   - session structure: multi_session_large.csv (48 sessions, 303 rounds,
-    per-round prefix/input/output token counts, arrival times, tool waits);
+    per-round prefix/input/output token counts, session arrivals,
+    inter-round tool waits);
   - tool-call rate: 2.0 tool events per round measured in the released real
     session (round_trace.jsonl); per-call storage I/O uses our harness's
     measured tool implementations (4 KiB index slot + log append + reads);
@@ -20,14 +21,15 @@ Two device classes: workstation (8 pages/token, Q4 8B-class) and mobile
 longer decode gaps), both on the same 16 GiB-scale device.
 
 Sessions are cloned with arrival jitter (documented amplification) to reach
-the occupancy target; the 2.75-hour trace window is scaled onto the horizon.
+the occupancy target; TraceLab's tool_wait_after_ms paces consecutive rounds
+within each cloned session.
 """
-import argparse, csv, json, math, random, sys
+import argparse, csv, json, random, sys
 from collections import defaultdict
 
 PG = 4096
 GiB = 1073741824
-TT_PGS = int((40 * GiB) / PG)  # nvmevirt default geometry: 40 GiB raw
+TT_PGS = int((16 * GiB) / PG)  # nvmevirt default geometry: 16 GiB raw
 S = 1_000_000_000
 
 ap = argparse.ArgumentParser()
@@ -61,19 +63,16 @@ for r in rows:
 for s in sess_rounds:
     sess_rounds[s].sort(key=lambda r: int(r['round_idx']))
 base_sessions = list(sess_rounds.values())
-t_span = max(float(r['arrival_time']) for r in rows)
-tscale = (args.horizon * 0.95) / t_span
 
-# template: per base session, list of rounds with (rel_arrival_s, new_tokens)
+# template: per base session, list of rounds with TraceLab token sizes and
+# the observed wait after each round.
 templates = []
 for rounds in base_sessions:
-    t0 = float(rounds[0]['arrival_time'])
     tpl = []
     for r in rounds:
         newtok = int(r['input_len']) + int(r['output_len'])
-        tpl.append(dict(rel=(float(r['arrival_time']) - t0) * tscale,
-                        newtok=max(newtok, 16),
-                        toolw=float(r['tool_wait_after_ms']) / 1e3))
+        tpl.append(dict(newtok=max(newtok, 16),
+                        wait_after=max(float(r['tool_wait_after_ms']) / 1e3, 0.0)))
     templates.append(tpl)
 
 sessions = [dict(t0=0, ops=[(0, 'WIX', 0, 0, IX_PGS, 1), (0, 'WML', 1, 0, ML_PGS, 0)])]
@@ -112,7 +111,7 @@ while heap:
         sid2 = len(sessions)
         obj = 2 + (sid2 - 1)
         sessions.append(dict(t0=t, ops=[]))
-        active[sid2] = dict(obj=obj, pgs=0, tpl=tpl, k=0)
+        active[sid2] = dict(obj=obj, pgs=0, tpl=tpl, k=0, pre_gap=0)
         future_growth += growth
         stats['arrivals'] += 1; stats['clones'] += 1
         push(t, 'round', sid2)
@@ -139,20 +138,23 @@ while heap:
         r = tpl[st['k']]; st['k'] += 1
         ops = sessions[sid]['ops']
         stats['rounds'] += 1
+        pre_gap = st['pre_gap']
+        st['pre_gap'] = 0
         first = True
         # resume: cold start always; otherwise only under LRU pressure
         need_resume = (st['pgs'] > 0 and
                        ((args.resume == 'lru' and sid not in lru)))
         if need_resume:
-            ops.append((0, 'RKV', st['obj'], 0, st['pgs'], 1))
+            ops.append((pre_gap, 'RKV', st['obj'], 0, st['pgs'], 1))
             stats['resumes'] += 1
             first = False
-        # tool calls at the TraceLab-measured rate, harness-measured I/O
+        # tool calls at the TraceLab-measured rate, harness-measured I/O.
+        # TraceLab's tool_wait_after_ms is applied as the next round's pre-gap.
         ntool = int(args.tools_per_round) + (1 if rng.random() < (args.tools_per_round % 1) else 0)
         for _ in range(ntool):
             stats['tool_calls'] += 1
-            g = int(max(r['toolw'], 0.05) * rng.uniform(0.6, 1.4) * S)
-            ops.append((g if not first else 0, 'RIX', 0, rng.randrange(IX_PGS), 1, 1 if first else 0))
+            tool_gap = int(rng.uniform(0.002, 0.015) * S)
+            ops.append((pre_gap if first else tool_gap, 'RIX', 0, rng.randrange(IX_PGS), 1, 1 if first else 0))
             first = False
             back = rng.randrange(1, int(0.55 * ML_PGS))
             ops.append((int(0.01 * S), 'RML', 1, max(0, ml_cursor - back), 1, 0))
@@ -162,13 +164,14 @@ while heap:
         # decode + write-through KV append (real per-round token counts)
         delta = r['newtok'] * PGTOK
         gdec = int(r['newtok'] * 0.02 * DECODE_X * S)      # ~50 tok/s ws, ~17 tok/s mobile
-        ops.append((gdec, 'WKV', st['obj'], st['pgs'], delta, 1 if first else 0))
+        ops.append(((pre_gap + gdec) if first else gdec, 'WKV', st['obj'], st['pgs'], delta, 1 if first else 0))
         st['pgs'] += delta; logical += delta; future_growth -= delta
         if args.resume == 'lru': lru_insert(sid, st['pgs'])
-        # next round at the trace's relative arrival (scaled), min 1 s ahead
+        wait_after = int(r['wait_after'] * S)
+        # next round carries TraceLab's post-round tool/user wait as its first-op gap
         if st['k'] < len(tpl):
-            nxt = sessions[sid]['t0'] + int(tpl[st['k']]['rel'] * S)
-            push(max(nxt, t + 1 * S), 'round', sid)
+            st['pre_gap'] = wait_after
+            push(t + max(wait_after, 1 * S), 'round', sid)
         else:
             push(t + 2 * S, 'round', sid)
     elif kind == 'death':
