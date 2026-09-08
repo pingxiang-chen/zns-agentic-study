@@ -17,3 +17,4 @@ figs/*
 scripts/*.csv
 scripts/*.txt
 sim/__pycache__
+sim/test_*.py

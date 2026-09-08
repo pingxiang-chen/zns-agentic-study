@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Plot the first N sessions on the trace's real absolute time axis."""
+"""Plot trace-session timelines or separate summary latency comparisons.
+
+Summary comparisons (one PNG, PDF, and CSV per available metric):
+    python3 scripts/plot_first_sessions_absolute_writes.py results/nvme_occ90
+
+Trace timelines:
+    python3 scripts/plot_first_sessions_absolute_writes.py --trace traces/tr_occ90.txt
+"""
 
 import argparse
 import csv
@@ -383,13 +390,30 @@ def write_md(rows, starts, ends, ended, selected_sids, out_md):
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--trace", type=Path, default=Path("../traces/tr_occ90.txt"))
-    ap.add_argument("--count", type=int, default=3)
-    ap.add_argument("--out-dir", type=Path, default=Path("../figs"))
-    ap.add_argument("--prefix", default="3")
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("results_dir", type=Path, nargs="?",
+                    help="Directory of conv/zns_k* *_summary.txt files to compare")
+    ap.add_argument("--trace", type=Path,
+                    help="Trace for session timelines (default: ../traces/tr_occ90.txt)")
+    ap.add_argument("--count", type=int, default=3, help="Number of trace sessions")
+    ap.add_argument("--out-dir", "--output-dir", type=Path,
+                    help="Output directory (summary: <results_dir>/plots; trace: ../figs)")
+    ap.add_argument("--prefix", default="3", help="Filename prefix for trace output")
     args = ap.parse_args()
 
+    if args.results_dir is not None:
+        if args.trace is not None:
+            ap.error("results_dir and --trace cannot be used together")
+        from plot_nvme_summary_comparison import generate_comparisons
+
+        try:
+            generate_comparisons(args.results_dir, args.out_dir)
+        except (OSError, ValueError) as error:
+            ap.error(str(error))
+        return
+
+    args.trace = args.trace or Path("../traces/tr_occ90.txt")
+    args.out_dir = args.out_dir or Path("../figs")
     trace_path, starts, sessions = parse_trace(args.trace)
     selected_sids = first_sessions(starts, args.count)
     if not selected_sids:

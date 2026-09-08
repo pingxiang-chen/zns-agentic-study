@@ -19,7 +19,10 @@ Environment overrides:
   SKIP_S             Initial seconds skipped in each trace. Default: 0
   MAX_CTX_TOK        Max context+generated tokens per request. Default: 32000
   AZURE_CONV_OCC     Occupancy for Azure conversation trace. Default: 0.85
-  AZURE_CODE_OCC     Occupancy for Azure code trace. Default: 0.75
+  AZURE_CODE_OCC     Occupancy for Azure code trace. Default: 0.25
+  AZURE_CODE_MAX_RESIDENT_REQUESTS
+                     Retained Azure code KV request limit. Default: 24
+                     Set to 0 to use only the byte budget.
   BURSTGPT_OCC       Occupancy for BurstGPT trace. Default: 0.60
   PYTHON             Python executable. Default: python3
   FORCE              Set to 1 to replace fetched trees and outputs.
@@ -59,7 +62,9 @@ WINDOW_S="${WINDOW_S:-7200}"
 SKIP_S="${SKIP_S:-0}"
 MAX_CTX_TOK="${MAX_CTX_TOK:-32000}"
 AZURE_CONV_OCC="${AZURE_CONV_OCC:-0.85}"
-AZURE_CODE_OCC="${AZURE_CODE_OCC:-0.75}"
+AZURE_CODE_OCC="${AZURE_CODE_OCC:-0.25}"
+# 24 KV objects at k=8 leave headroom on a 256-zone, 64 MiB/zone device.
+AZURE_CODE_MAX_RESIDENT_REQUESTS="${AZURE_CODE_MAX_RESIDENT_REQUESTS:-24}"
 BURSTGPT_OCC="${BURSTGPT_OCC:-0.60}"
 PYTHON="${PYTHON:-python3}"
 
@@ -131,6 +136,7 @@ convert_trace() {
   local format="$2"
   local occ="$3"
   local input="$4"
+  local max_resident_requests="${5:-0}"
   local output="$TRACE_DIR/${name}.txt"
   local stats="$TRACE_DIR/${name}_stats.json"
 
@@ -143,6 +149,7 @@ convert_trace() {
     --csv "$input" \
     --format "$format" \
     --occ "$occ" \
+    --max-resident-requests "$max_resident_requests" \
     --window-s "$WINDOW_S" \
     --skip-s "$SKIP_S" \
     --max-ctx-tok "$MAX_CTX_TOK" \
@@ -153,7 +160,7 @@ convert_trace() {
 convert_trace tr_azconv azure "$AZURE_CONV_OCC" \
   "$AZURE_DIR/data/AzureLLMInferenceTrace_conv.csv"
 convert_trace tr_azcode azure "$AZURE_CODE_OCC" \
-  "$AZURE_DIR/data/AzureLLMInferenceTrace_code.csv"
+  "$AZURE_DIR/data/AzureLLMInferenceTrace_code.csv" "$AZURE_CODE_MAX_RESIDENT_REQUESTS"
 convert_trace tr_bgpt burstgpt "$BURSTGPT_OCC" \
   "$BURSTGPT_DIR/data/BurstGPT_1.csv"
 

@@ -1,6 +1,11 @@
 #!/bin/bash
 
-TRACE="../traces/tr_tlw.txt"
+if [ "$#" -ne 1 ] || [ -z "$1" ]; then
+    echo "Usage: sudo $0 <trace_file>" >&2
+    exit 1
+fi
+
+TRACE="$1"
 SCALE="1"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -23,7 +28,7 @@ trace_output_dir() {
         trace_prefix="$trace_file"
     fi
 
-    printf "%s\n" "$trace_prefix"
+    printf "%s_%s\n" "$(date +%Y-%m-%d)" "$trace_prefix"
 }
 
 archive_outputs_for_trace() {
@@ -33,8 +38,6 @@ archive_outputs_for_trace() {
     out_dir="$(trace_output_dir "$TRACE")"
 
     out_dir="$RESULT_DIR/$out_dir"
-
-    echo $out_dir
 
     mkdir -p "$out_dir"
 
@@ -55,9 +58,9 @@ archive_outputs_for_trace() {
 
 for (( k=1; k<=16; k*=2 ))
 do 
-   ./run_experiment.sh mode=zns size=40GiB k=$k trace=$TRACE scale=$SCALE
+   ./run_experiment.sh mode=zns size=40GiB k=$k "trace=$TRACE" scale=$SCALE
 done
 
-./run_experiment.sh mode=conv size=40GiB trace=$TRACE scale=$SCALE
+./run_experiment.sh mode=conv size=40GiB "trace=$TRACE" scale=$SCALE
 
 archive_outputs_for_trace

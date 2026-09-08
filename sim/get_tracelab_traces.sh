@@ -26,10 +26,10 @@ Environment overrides:
 
 Outputs:
   ../traces/tracelab/replay/examples/*.csv
-  ../traces/tr_tlw.txt
-  ../traces/tr_tlm.txt
-  ../traces/tr_tlw_stats.json
-  ../traces/tr_tlm_stats.json
+  ../traces/tr_tlw_${RESUME}.txt
+  ../traces/tr_tlm_${RESUME}.txt
+  ../traces/tr_tlw_${RESUME}_stats.json
+  ../traces/tr_tlm_${RESUME}_stats.json
 EOF
 }
 
@@ -76,10 +76,10 @@ esac
 mkdir -p "$TRACE_DIR"
 
 outputs=(
-  "$TRACE_DIR/tr_tlw.txt"
-  "$TRACE_DIR/tr_tlm.txt"
-  "$TRACE_DIR/tr_tlw_stats.json"
-  "$TRACE_DIR/tr_tlm_stats.json"
+  "$TRACE_DIR/tr_tlw_${RESUME}.txt"
+  "$TRACE_DIR/tr_tlm_${RESUME}.txt"
+  "$TRACE_DIR/tr_tlw_${RESUME}_stats.json"
+  "$TRACE_DIR/tr_tlm_${RESUME}_stats.json"
 )
 
 if [[ "$force" != "1" ]]; then
@@ -135,11 +135,11 @@ convert_trace() {
 }
 
 convert_trace workstation "$WORKSTATION_OCC" \
-  "$TRACE_DIR/tr_tlw.txt" \
-  "$TRACE_DIR/tr_tlw_stats.json"
+  "$TRACE_DIR/tr_tlw_${RESUME}.txt" \
+  "$TRACE_DIR/tr_tlw_${RESUME}_stats.json"
 convert_trace mobile "$MOBILE_OCC" \
-  "$TRACE_DIR/tr_tlm.txt" \
-  "$TRACE_DIR/tr_tlm_stats.json"
+  "$TRACE_DIR/tr_tlm_${RESUME}.txt" \
+  "$TRACE_DIR/tr_tlm_${RESUME}_stats.json"
 
 echo "Fetched TraceLab replay examples under: $RAW_DIR"
 echo "Converted simulator traces under: $TRACE_DIR"

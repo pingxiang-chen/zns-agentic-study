@@ -87,7 +87,7 @@ heap = []; seqn = [0]
 def push(t, kind, sid): heapq.heappush(heap, (t, seqn[0], kind, sid)); seqn[0] += 1
 active = {}
 push(0, 'arrive', -1)
-arrival_gap = 4.0 if args.mode == 'workstation' else 30.0
+arrival_gap = 2.0 if args.mode == 'workstation' else 10.0
 
 def lru_insert(sid, pgs):
     global gpu_used
@@ -137,6 +137,7 @@ while heap:
             stats['evictions'] += 1
         r = tpl[st['k']]; st['k'] += 1
         ops = sessions[sid]['ops']
+        round_ops_start = len(ops)
         stats['rounds'] += 1
         pre_gap = st['pre_gap']
         st['pre_gap'] = 0
@@ -167,13 +168,17 @@ while heap:
         ops.append(((pre_gap + gdec) if first else gdec, 'WKV', st['obj'], st['pgs'], delta, 1 if first else 0))
         st['pgs'] += delta; logical += delta; future_growth -= delta
         if args.resume == 'lru': lru_insert(sid, st['pgs'])
+        # Advance by the emitted tool/decode gaps. The round's start time t
+        # already includes pre_gap, so count that wait only once. Device
+        # I/O latency is determined later by the simulator.
+        round_end = t + sum(op[0] for op in ops[round_ops_start:]) - pre_gap
         wait_after = int(r['wait_after'] * S)
         # next round carries TraceLab's post-round tool/user wait as its first-op gap
         if st['k'] < len(tpl):
             st['pre_gap'] = wait_after
-            push(t + max(wait_after, 1 * S), 'round', sid)
+            push(round_end + wait_after, 'round', sid)
         else:
-            push(t + 2 * S, 'round', sid)
+            push(round_end + 2 * S, 'round', sid)
     elif kind == 'death':
         st = active.pop(sid, None)
         if st is None: continue
