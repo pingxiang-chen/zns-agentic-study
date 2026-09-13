@@ -13,11 +13,27 @@ RUN_SET="both"
 SCALE="1"
 CONFIRM=""
 PRECONDITION="1"
-PRECOND_LOOPS="2"
+PRECOND_LOOPS="1"
 PRECOND_BS="128k"
 QDEPTH=""
 TASKSET_CPUS=""
 REPLAYER="$KIT_DIR/replayer"
+
+trace_output_dir() {
+    local trace_file
+    local trace_prefix
+
+    trace_file="$(basename -- "$TRACE")"
+    trace_prefix="${trace_file%.*}"
+
+    if [ -z "$trace_prefix" ] || [ "$trace_prefix" = "$trace_file" ]; then
+        trace_prefix="$trace_file"
+    fi
+
+    printf "%s_%s\n" "$(date +%Y-%m-%d)" "$trace_prefix"
+}
+
+
 
 usage() {
     cat <<EOF
@@ -341,6 +357,8 @@ fi
 [[ -n "$DEVICE" ]] || die "device=/dev/nvmeXnY is required"
 [[ "$CONFIRM" == "YES_I_UNDERSTAND" ]] || die "pass confirm=YES_I_UNDERSTAND to acknowledge destructive writes"
 
+RESULTS_DIR="$RESULTS_DIR/$(trace_output_dir "$TRACE")"
+
 case "$RUN_SET" in
     both|trim|notrim)
         ;;
@@ -426,8 +444,7 @@ case "$RUN_SET" in
         ;;
 esac
 
-python3 diff_before_after_csv.py --include-metadata -o "$RESULTS_DIR/1_block_difference.csv"
-python3 diff_before_after_smart_txt.py --include-metadata -o "$RESULTS_DIR/2_smart_difference.csv"
-python3 ../nvmevirt-kit/extract_index_cmds.py  ../results/hw -o "$RESULTS_DIR/3_summary.txt"
+python3 diff_before_after_csv.py $RESULTS_DIR --include-metadata -o "$RESULTS_DIR/1_block_difference.csv"
+python3 diff_before_after_smart_txt.py $RESULTS_DIR --include-metadata -o "$RESULTS_DIR/2_smart_difference.csv"
 
 maybe_chown_outputs

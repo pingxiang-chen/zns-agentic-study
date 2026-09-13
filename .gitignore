@@ -16,5 +16,7 @@ results/*
 figs/*
 scripts/*.csv
 scripts/*.txt
+scripts/*.dat
 sim/__pycache__
 sim/test_*.py
+docs/*

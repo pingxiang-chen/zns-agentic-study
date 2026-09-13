@@ -41,6 +41,16 @@ gunzip -k ../traces/tr_occ90.txt.gz
 make replayer
 ```
 
+KV operations preserve each object's nominal trace order across sessions. An
+eviction waits for the victim's preceding reads and appends to complete, even
+when I/O delays make the evicting session catch up with it. Waiting operations
+release their worker; replay logs report `KV ordering: deferred_ops=...` and
+`deferred_deletes=...`. This applies to both conventional and ZNS replay.
+
+Run the scheduler/eviction regressions with `make test`. To also replay the full
+LRU trace with mocked device I/O, use
+`make test TRACE=../traces/tr_tlw_lru.txt`. These tests do not access a block device.
+
 We provide a python3 scripts `keep_log_percentage.py` in `traces` folder that allow users to extract `X%` of the original logs.
 ```bash
 python3 keep_log_percentage.py tr_occ90.txt 10%

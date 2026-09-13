@@ -315,9 +315,18 @@ static u64 burst(int wr, io_t *ios, int n, int qd, int cls) {
 }
 
 /* ---------------- trace ---------------- */
-typedef struct { u64 gap; u32 obj; u64 off, len, line_no; uint8_t op, ts; } op_t;
+typedef struct op {
+    u64 gap; u32 obj; u64 off, len, line_no; uint8_t op, ts;
+    /* Protected by sched_mu during replay; released after actual I/O completes. */
+    struct op *kv_next;
+    u32 kv_wait_sid;
+    int kv_ready;
+} op_t;
 typedef struct { op_t *ops; u32 n; u64 t0; } sess_t;
 static sess_t *sess; static u32 n_sess;
+static int is_kv_op(const op_t *o) {
+    return o->op == OP_WKV || o->op == OP_RKV || o->op == OP_DEL;
+}
 static const char *TRACE_PATH;
 static u64 RPROG_INTERVAL = 10000;
 static u64 RPROG_TOTAL_OPS, RPROG_TOTAL_LOG_WRITES, RPROG_TOTAL_LOG_PAGES;
@@ -1490,6 +1499,55 @@ static u32 sched_heap_n, sched_done;
 static int sched_stop;
 static pthread_mutex_t sched_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t sched_cv;
+static u64 sched_kv_deferrals, sched_del_deferrals;
+
+typedef struct { op_t *op; u64 trace_ns; u32 sid, op_idx; } kv_order_ev_t;
+
+static int kv_order_cmp(const void *a, const void *b) {
+    const kv_order_ev_t *x = a, *y = b;
+    if (x->op->obj != y->op->obj) return x->op->obj < y->op->obj ? -1 : 1;
+    if (x->trace_ns != y->trace_ns) return x->trace_ns < y->trace_ns ? -1 : 1;
+    if (x->sid != y->sid) return x->sid < y->sid ? -1 : 1;
+    return x->op_idx < y->op_idx ? -1 : x->op_idx > y->op_idx;
+}
+
+static void init_kv_order(void) {
+    /* Session-relative I/O delays can let another session's eviction overtake
+     * a victim's reads or appends. Preserve nominal trace order per KV object,
+     * including DEL, so freeing extents/resetting zones waits for prior I/O.
+     * Including subsequent uses also preserves delete-and-recreate lifetimes.
+     * Same-time ties follow the scheduler's session order, then operation order.
+     */
+    size_t n = 0;
+    for (u32 s = 0; s < n_sess; s++)
+        for (u32 i = 0; i < sess[s].n; i++)
+            if (is_kv_op(&sess[s].ops[i])) n++;
+    if (!n) return;
+    kv_order_ev_t *events = malloc(n * sizeof(*events));
+    if (!events) exit(9);
+    size_t j = 0;
+    for (u32 s = 0; s < n_sess; s++) {
+        u64 t = sess[s].t0;
+        for (u32 i = 0; i < sess[s].n; i++) {
+            op_t *o = &sess[s].ops[i];
+            t += o->gap;
+            if (!is_kv_op(o)) continue;
+            o->kv_next = NULL;
+            o->kv_wait_sid = UINT32_MAX;
+            o->kv_ready = 0;
+            events[j++] = (kv_order_ev_t){ o, t, s, i };
+        }
+    }
+    qsort(events, n, sizeof(*events), kv_order_cmp);
+    for (size_t i = 0; i < n; i++) {
+        op_t *o = events[i].op;
+        if (i && events[i - 1].op->obj == o->obj)
+            events[i - 1].op->kv_next = o;
+        else
+            o->kv_ready = 1;
+    }
+    free(events);
+}
 
 static u64 scaled_ns(u64 ns) {
     return (u64)((double)ns * TSCALE);
@@ -1522,6 +1580,19 @@ static sched_ev_t sched_pop_locked(void) {
         i = m;
     }
     return ret;
+}
+
+static void sched_complete_kv_locked(op_t *o) {
+    op_t *next = o->kv_next;
+    if (!next) return;
+    next->kv_ready = 1;
+    if (next->kv_wait_sid != UINT32_MAX) {
+        /* This operation was already due. Requeue it without adding its gap
+         * or advancing its trace timestamp a second time. */
+        sched_push_locked((sched_ev_t){ now_ns(), next->kv_wait_sid });
+        next->kv_wait_sid = UINT32_MAX;
+        pthread_cond_broadcast(&sched_cv);
+    }
 }
 
 static void sched_arm_next_locked(u32 sid, u64 base_ns) {
@@ -1573,6 +1644,15 @@ static void *sched_worker(void *arg) {
                 continue;
             }
             ev = sched_pop_locked();
+            op_t *o = &sess[ev.sid].ops[sess_run[ev.sid].next_op];
+            if (is_kv_op(o) && !o->kv_ready) {
+                /* Park the session, not the worker: the predecessor must be
+                 * able to run even with a single worker or many evictions. */
+                o->kv_wait_sid = ev.sid;
+                sched_kv_deferrals++;
+                if (o->op == OP_DEL) sched_del_deferrals++;
+                continue;
+            }
             break;
         }
         pthread_mutex_unlock(&sched_mu);
@@ -1603,6 +1683,11 @@ static void *sched_worker(void *arg) {
             rprog_note_issued(ev.sid, op_idx, trace_ns, o);
             if (measure) R->turn_measured = 1;
             R->next_op++;
+            if (is_kv_op(o)) {
+                pthread_mutex_lock(&sched_mu);
+                sched_complete_kv_locked(o);
+                pthread_mutex_unlock(&sched_mu);
+            }
         }
 
         if (rc < 0 || stop_requested()) {
@@ -1637,6 +1722,7 @@ static int default_session_workers(void) {
 
 static void run_sessions_bounded(void) {
     if (!n_sess) return;
+    init_kv_order();
 
     pthread_condattr_t attr;
     pthread_condattr_init(&attr);
@@ -1668,6 +1754,8 @@ static void run_sessions_bounded(void) {
     if (!th) exit(9);
     for (int i = 0; i < workers; i++) pthread_create(&th[i], NULL, sched_worker, NULL);
     for (int i = 0; i < workers; i++) pthread_join(th[i], NULL);
+    fprintf(stderr, "KV ordering: deferred_ops=%" PRIu64 " deferred_deletes=%" PRIu64 "\n",
+            sched_kv_deferrals, sched_del_deferrals);
     free(th);
     free(sched_heap); sched_heap = NULL; sched_heap_n = 0;
     free(sess_run); sess_run = NULL;
