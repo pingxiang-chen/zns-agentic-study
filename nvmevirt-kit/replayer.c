@@ -7,8 +7,8 @@
  *   - user-space extent allocator over the raw LBA space (first-fit, coalescing),
  *     mirrors the simulator's host layer; DELETE issues BLKDISCARD (TRIM).
  * ZNS mode (-m zns):
- *   - KV blobs use per-session zone chains when the device reports no open-zone
- *     limit, or runtime-multiplexed KV lanes when max_open_zones is bounded.
+ *   - KV blobs use adaptive private session tails with shared overflow and a
+ *     dedicated GC destination; --kv-policy legacy retains fixed placement.
  *   - FIFO memlog zones, log-structured index zones with host compaction;
  *     DELETE issues BLKRESETZONE.
  *   - host-managed GC event counters are printed to stderr every 5 seconds.
@@ -71,7 +71,8 @@ static const char *op_name(uint8_t op) {
 
 static double TSCALE = 1.0;
 static int QD = 32, MODE_ZNS = 0, FD = -1, SESSION_WORKERS = 0;
-static int KSTRIPE = 8;      /* -k: parallel zone chains per KV blob (zns mode).
+static int KSTRIPE = 8;      /* -k: maximum private streams in adaptive mode;
+                                parallel zone chains per blob in legacy mode.
                                 Each chain is written strictly sequentially
                                 (write-pointer safe); K chains in parallel
                                 recover the stripe bandwidth that one QD1
@@ -83,6 +84,15 @@ static u64 ZNS_ACTIVE_ZONE_LIMIT = 0, ZNS_ACTIVE_ZONES = 0, PEAK_ZNS_ACTIVE_ZONE
 static u64 KV_OPEN_ZONE_LIMIT = 0, KV_OPEN_ZONES = 0, PEAK_KV_OPEN_ZONES = 0;
 static u64 LIVE_KV_SESSIONS = 0, PEAK_LIVE_KV_SESSIONS = 0;
 static int KV_SHARED = 0, KV_SHARED_LANES = 0;
+/* Adaptive policy uses lane 0 for GC, lane 1 for shared overflow, and
+ * dynamically assigns the remaining lanes to private session tails. */
+static int KV_ADAPTIVE = 1, KV_ADAPTIVE_READY;
+static u32 *kv_lane_owner;
+static u64 *kv_zone_written;
+static int kv_pressure;
+static u64 kv_private_pages, kv_shared_pages, kv_policy_changes, kv_peak_tail_pages;
+static u64 kv_metadata_reserve;
+
 #define KV_GC_MIN_FREE_ZONE_RESERVE 1
 #define ZNS_META_OPEN_ZONES 2        /* one memlog append zone + one index append zone */
 static u64 DEV_PGS, ZONE_PGS, ZONE_CAP_PGS, N_ZONES;
@@ -168,9 +178,10 @@ static u64 zns_allocatable_zone_count(void) {
     pthread_mutex_unlock(&z_mu);
     return n;
 }
-static int zns_alloc_zone(void) {
+static int zns_alloc_zone_reserved(u64 reserve) {
     pthread_mutex_lock(&z_mu);
-    if (!zf_cnt || (ZNS_ACTIVE_ZONE_LIMIT && ZNS_ACTIVE_ZONES >= ZNS_ACTIVE_ZONE_LIMIT)) {
+    if (zf_cnt <= reserve || (ZNS_ACTIVE_ZONE_LIMIT &&
+        ZNS_ACTIVE_ZONES + reserve >= ZNS_ACTIVE_ZONE_LIMIT)) {
         pthread_mutex_unlock(&z_mu);
         return -1;
     }
@@ -184,6 +195,9 @@ static int zns_alloc_zone(void) {
     pthread_mutex_unlock(&z_mu);
     return z;
 }
+static int zns_alloc_zone(void) {
+    return zns_alloc_zone_reserved(KV_ADAPTIVE_READY ? 1 : 0);
+}
 static void zns_note_zone_full(int z) {
     pthread_mutex_lock(&z_mu);
     if (zactive && z >= 0 && (u64)z < N_ZONES && zactive[z]) {
@@ -195,7 +209,7 @@ static void zns_note_zone_full(int z) {
 static void zns_reset_zone(int z) {
 #ifdef HAVE_BLKZONED
     struct blk_zone_range r = { .sector = (u64)z * ZONE_PGS * (PGSZ / 512), .nr_sectors = ZONE_PGS * (PGSZ / 512) };
-    if (ioctl(FD, BLKRESETZONE, &r) < 0) perror("BLKRESETZONE");
+    if (ioctl(FD, BLKRESETZONE, &r) < 0) { perror("BLKRESETZONE"); exit(3); }
 #endif
     pthread_mutex_lock(&z_mu);
     if (zactive && z >= 0 && (u64)z < N_ZONES && zactive[z]) {
@@ -254,7 +268,7 @@ static void *iobuf(void) { static __thread void *b = NULL; if (!b) { if (posix_m
 static void pio(int wr, u64 pg, u64 npg) {          /* synchronous single command */
     void *b = iobuf();
     ssize_t r = wr ? pwrite(FD, b, npg * PGSZ, pg * PGSZ) : pread(FD, b, npg * PGSZ, pg * PGSZ);
-    if (r < 0) { perror(wr ? "pwrite" : "pread"); exit(8); }
+    if (r != (ssize_t)(npg * PGSZ)) { fprintf(stderr, "short or failed %s\n", wr ? "pwrite" : "pread"); exit(8); }
 }
 
 /* burst of commands with QD via POSIX AIO; entries: (pg, npg) */
@@ -477,6 +491,7 @@ static u64 kv_hash64(u64 x) {
 }
 
 static u64 kv_shared_gc_reserve_locked(void) {
+    if (KV_ADAPTIVE_READY) return 1;
     u64 r = KV_SHARED_LANES < KSTRIPE ? (u64)KV_SHARED_LANES : (u64)KSTRIPE;
     if (r < KV_GC_MIN_FREE_ZONE_RESERVE) r = KV_GC_MIN_FREE_ZONE_RESERVE;
     return r;
@@ -554,7 +569,7 @@ static u64 kv_shared_lane_rem_locked(int lane) {
 static int kv_shared_append_locked(u32 obj, int lane, u64 n, u64 *pg) {
     if (lane < 0 || lane >= KV_SHARED_LANES || !n) return -1;
     if (kv_lane_zone[lane] < 0 || kv_lane_wp[lane] == ZONE_CAP_PGS) {
-        int z = zns_alloc_zone();
+        int z = KV_ADAPTIVE_READY && lane == 0 ? zns_alloc_zone_reserved(0) : zns_alloc_zone();
         if (z < 0) return -1;
         kv_lane_zone[lane] = z;
         kv_lane_wp[lane] = 0;
@@ -565,6 +580,7 @@ static int kv_shared_append_locked(u32 obj, int lane, u64 n, u64 *pg) {
     int z = kv_lane_zone[lane];
     *pg = (u64)z * ZONE_PGS + kv_lane_wp[lane];
     kv_lane_wp[lane] += n;
+    if (kv_zone_written) kv_zone_written[z] += n;
     kv_zone_live[z] += n;
     kv_zone_used[z] = 1;
     kv_zone_ref_add_locked(z, obj);
@@ -598,11 +614,13 @@ static void kv_shared_reset_zone_locked(int z) {
             if (kv_lane_wp[i] < ZONE_CAP_PGS) was_open = 1;
             kv_lane_zone[i] = -1;
             kv_lane_wp[i] = 0;
+            if (kv_lane_owner) kv_lane_owner[i] = 0;
         }
     }
     if (was_open) kv_shared_note_zone_closed_locked();
     kv_zone_live[z] = 0;
     kv_zone_used[z] = 0;
+    if (kv_zone_written) kv_zone_written[z] = 0;
     kv_zone_refs_clear_locked(z);
     zns_reset_zone(z);
 }
@@ -612,9 +630,9 @@ static int kv_shared_pick_victim_locked(int allow_relocation) {
     u64 best_live = UINT64_MAX;
     for (u64 z = 0; z < N_ZONES; z++) {
         if (!kv_zone_used[z]) continue;
+        if (!kv_zone_live[z]) return (int)z;
         if (kv_shared_zone_is_open_locked((int)z)) continue;
         if (kv_zone_live[z] >= ZONE_CAP_PGS) continue;
-        if (!kv_zone_live[z]) return (int)z;
         if (!allow_relocation) continue;
         if (kv_zone_live[z] < best_live) {
             best_live = kv_zone_live[z];
@@ -630,7 +648,7 @@ static int kv_shared_relocate_range_locked(u32 obj, u64 logical, u64 oldpg, u64 
                                            int measure) {
     while (len) {
         int stripe = (int)((logical / CMD_PGS) % (u64)KSTRIPE);
-        int lane = kv_shared_lane_for_locked(obj, stripe);
+        int lane = KV_ADAPTIVE_READY ? 0 : kv_shared_lane_for_locked(obj, stripe);
         u64 n = len;
         u64 old_zrem = zns_zone_cap_rem(oldpg);
         if (!old_zrem) { fprintf(stderr, "shared KV relocation extent beyond zone capacity\n"); exit(4); }
@@ -718,7 +736,7 @@ static int kv_shared_compact_obj_from_zone_locked(u32 obj, int victim,
 static int kv_shared_compact_zone_locked(int victim, u32 sid, u32 op_idx, u64 trace_ns, const op_t *op,
                                              int measure) {
     if (victim < 0 || (u64)victim >= N_ZONES || !kv_zone_used[victim]) return 0;
-    if (kv_shared_zone_is_open_locked(victim)) return 0;
+    if (kv_zone_live[victim] && kv_shared_zone_is_open_locked(victim)) return 0;
 
     u64 epoch = ++kv_gc_epoch;
     if (!epoch && kv_obj_gc_seen) {
@@ -753,6 +771,7 @@ static int kv_shared_compact_zone_locked(int victim, u32 sid, u32 op_idx, u64 tr
         fprintf(stderr, "warning: shared KV compaction left zone %d with %" PRIu64 " live pages\n",
                 victim, kv_zone_live[victim]);
     }
+    if (kv_zone_live[victim]) return -1;
     kv_shared_reset_zone_locked(victim);
     zns_note_host_gc(ZNS_HOST_GC_KV, 1, measure);
     return 0;
@@ -832,6 +851,131 @@ static int kv_shared_prepare_write_locked(u32 obj, u64 off, u64 len,
         return -1;
     }
     return kv_shared_gc_until_allocatable_locked(needed, sid, op_idx, trace_ns, op, measure);
+}
+
+/* Snapshot under kv_shared_mu; metadata's zone counters use z_mu. */
+static void kv_space_report(FILE *out, const char *tag) {
+    u64 live = 0, written = 0, tails = 0;
+    for (u64 z = 0; z < N_ZONES; z++) {
+        if (!kv_zone_used[z]) continue;
+        live += kv_zone_live[z];
+        written += kv_zone_written ? kv_zone_written[z] : kv_zone_live[z];
+    }
+    for (int i = 0; i < KV_SHARED_LANES; i++)
+        if (kv_lane_zone[i] >= 0 && kv_lane_wp[i] < ZONE_CAP_PGS)
+            tails += ZONE_CAP_PGS - kv_lane_wp[i];
+    if (tails > kv_peak_tail_pages) kv_peak_tail_pages = tails;
+    pthread_mutex_lock(&z_mu);
+    u64 empty = zf_cnt, active = ZNS_ACTIVE_ZONES;
+    pthread_mutex_unlock(&z_mu);
+    fprintf(out, "ZNS_SPACE[%s] policy=%s live_pages=%" PRIu64
+            " invalid_pages=%" PRIu64 " tail_pages=%" PRIu64
+            " peak_tail_pages=%" PRIu64 " empty_zones=%" PRIu64
+            " active_zones=%" PRIu64 " allocatable_zones=%" PRIu64
+            " pressure=%d private_pages=%" PRIu64 " shared_pages=%" PRIu64
+            " policy_changes=%" PRIu64 "\n", tag,
+            KV_ADAPTIVE_READY ? "adaptive" : "legacy", live,
+            written >= live ? written - live : 0, tails, kv_peak_tail_pages,
+            empty, active, zns_allocatable_zone_count(), kv_pressure,
+            kv_private_pages, kv_shared_pages, kv_policy_changes);
+}
+
+static void kv_adaptive_pressure(void) {
+    u64 live = 0, tails = 0;
+    for (u64 z = 0; z < N_ZONES; z++) live += kv_zone_live[z];
+    for (int i = 0; i < KV_SHARED_LANES; i++)
+        if (kv_lane_zone[i] >= 0 && kv_lane_wp[i] < ZONE_CAP_PGS)
+            tails += ZONE_CAP_PGS - kv_lane_wp[i];
+    if (tails > kv_peak_tail_pages) kv_peak_tail_pages = tails;
+    u64 available = zns_allocatable_zone_count();
+    u64 low = kv_metadata_reserve + 2 + N_ZONES / 20;
+    u64 high = low + 2 + N_ZONES / 20;
+    int old = kv_pressure;
+    if (available <= low || live > (N_ZONES * ZONE_CAP_PGS / 100) * 85)
+        kv_pressure = 1;
+    else if (available >= high && live < (N_ZONES * ZONE_CAP_PGS / 100) * 80)
+        kv_pressure = 0;
+    if (old != kv_pressure) kv_policy_changes++;
+}
+
+/* Additional streams need both a large pending append and a per-session share
+ * of the slot budget. Drain existing tails when the allowance shrinks. */
+static int kv_adaptive_lane(u32 obj, u64 remaining, u64 round) {
+    kv_adaptive_pressure();
+    int owned[MAXK], count = 0, free_lane = -1, shared = -1;
+    for (int i = 1; i < KV_SHARED_LANES; i++) {
+        int partial = kv_lane_zone[i] >= 0 && kv_lane_wp[i] < ZONE_CAP_PGS;
+        if (!partial) {
+            kv_lane_owner[i] = 0;
+            if (i >= 2 && free_lane < 0) free_lane = i;
+        } else if (kv_lane_owner[i] == obj && count < MAXK) owned[count++] = i;
+        else if (kv_lane_owner[i] == UINT32_MAX) shared = i;
+    }
+    int limit = 1;
+    u64 sessions = LIVE_KV_SESSIONS ? LIVE_KV_SESSIONS : 1;
+    u64 spare = zns_allocatable_zone_count();
+    if (!kv_pressure && remaining >= 2 * ZONE_CAP_PGS) {
+        u64 fair = (u64)(KV_SHARED_LANES - 2) / sessions;
+        u64 capacity = spare > kv_metadata_reserve + 1 ?
+            (spare - kv_metadata_reserve - 1) / sessions : 0;
+        u64 large = remaining / ZONE_CAP_PGS;
+        limit = KSTRIPE;
+        if ((u64)limit > fair) limit = (int)fair;
+        if ((u64)limit > capacity) limit = (int)capacity;
+        if ((u64)limit > large) limit = (int)large;
+        if (limit < 1) limit = 1;
+    }
+    if (!kv_pressure && count < limit && free_lane >= 0 &&
+        spare > kv_metadata_reserve + 2) {
+        kv_lane_owner[free_lane] = obj;
+        return free_lane;
+    }
+    if (count) {
+        if (count > limit || kv_pressure) {
+            int best = owned[0];
+            for (int j = 1; j < count; j++)
+                if (kv_lane_wp[owned[j]] > kv_lane_wp[best]) best = owned[j];
+            return best;
+        }
+        return owned[round % (u64)count];
+    }
+    if (shared >= 0) return shared;
+    if (spare > kv_metadata_reserve + 1) {
+        kv_lane_owner[1] = UINT32_MAX;
+        return 1;
+    }
+    /* No new slot: lend one existing private tail to the shared pool. Its
+     * prior owner keeps all extent mappings, but loses exclusive reclamation. */
+    int best = -1;
+    for (int i = 2; i < KV_SHARED_LANES; i++) {
+        if (kv_lane_zone[i] < 0 || kv_lane_wp[i] == ZONE_CAP_PGS) continue;
+        if (best < 0 || kv_lane_wp[i] < kv_lane_wp[best]) best = i;
+    }
+    if (best >= 0) {
+        kv_lane_owner[best] = UINT32_MAX;
+        kv_policy_changes++;
+        return best;
+    }
+    kv_lane_owner[1] = UINT32_MAX;
+    return 1;
+}
+
+static int kv_adaptive_make_room(u32 sid, u32 op_idx, u64 trace_ns,
+                                 const op_t *op, int measure) {
+    u64 target = kv_metadata_reserve + 2;
+    for (u64 pass = 0; pass < N_ZONES; pass++) {
+        if (zns_allocatable_zone_count() >= target) return 0;
+        int victim = kv_shared_pick_victim_locked(1);
+        if (victim < 0) break;
+        /* The dedicated GC tail plus one protected empty zone provide enough
+         * destination capacity. No foreground I/O is pending at this point. */
+        u64 rem = kv_lane_zone[0] >= 0 && kv_lane_wp[0] < ZONE_CAP_PGS ?
+            ZONE_CAP_PGS - kv_lane_wp[0] : 0;
+        if (kv_zone_live[victim] > rem && !zns_allocatable_zone_count()) break;
+        if (kv_shared_compact_zone_locked(victim, sid, op_idx, trace_ns, op, measure) < 0)
+            return -1;
+    }
+    return zns_allocatable_zone_count() >= target ? 0 : -1;
 }
 
 static void kv_shared_delete_obj_locked(u32 obj, obj_t *ob) {
@@ -1016,6 +1160,8 @@ static void zns_configure_open_zone_mux(void) {
         ZNS_OPEN_ZONE_LIMIT = kv_lanes + ZNS_META_OPEN_ZONES;
     }
 
+    if (KV_ADAPTIVE && !ZNS_OPEN_ZONE_LIMIT)
+        ZNS_OPEN_ZONE_LIMIT = N_ZONES;
     if (!ZNS_OPEN_ZONE_LIMIT) {
         fprintf(stderr,
                 "zns open-zone mux: mode=exclusive max_open_zones=unlimited"
@@ -1053,6 +1199,10 @@ static void zns_configure_open_zone_mux(void) {
     if (KV_OPEN_ZONE_LIMIT > 0x7fffffffULL) KV_OPEN_ZONE_LIMIT = 0x7fffffffULL;
     KV_SHARED = 1;
     KV_SHARED_LANES = (int)KV_OPEN_ZONE_LIMIT;
+    if (KV_ADAPTIVE && KV_SHARED_LANES < 3) {
+        request_storage_stop(3, "zns_adaptive_needs_three_kv_slots", 0, 0, 0, NULL);
+        return;
+    }
 
     fprintf(stderr,
             "zns open-zone mux: mode=runtime-shared max_open_zones=%" PRIu64
@@ -1149,7 +1299,7 @@ static void *sw_worker(void *a_) {
     memset(buf, 0x5A, CMDSZ);
     for (int i = 0; i < a->nio; i++) if (sw_should_run(a, i)) {
         u64 c0 = now_ns();
-        if (pwrite(FD, buf, a->ios[i].npg * PGSZ, a->ios[i].pg * PGSZ) < 0) { perror("zns pwrite"); exit(8); }
+        if (pwrite(FD, buf, a->ios[i].npg * PGSZ, a->ios[i].pg * PGSZ) != (ssize_t)(a->ios[i].npg * PGSZ)) { perror("zns pwrite"); exit(8); }
         if (a->cls >= 0) lv_add(a->cls, now_ns() - c0);
     }
     free(buf);
@@ -1162,11 +1312,32 @@ static u64 zns_striped_write(io_t *ios, int nio, int cls) {
     if (streams < 1) streams = 1;
     int k = streams < nio ? streams : (nio ? nio : 1);
     if (k > MAXK) k = MAXK;
-    for (int w = 0; w < k; w++) {
-        args[w] = (struct sw_arg){ ios, nio, w, cls, k, 1 };
-        pthread_create(&th[w], NULL, sw_worker, &args[w]);
+    if (KV_ADAPTIVE_READY) {
+        int lanes[MAXK], used = 0;
+        for (int i = 0; i < nio; i++) {
+            int j = 0;
+            while (j < used && lanes[j] != ios[i].stream) j++;
+            if (j == used) {
+                if (used == MAXK) { fprintf(stderr, "too many adaptive batch streams\n"); exit(4); }
+                lanes[used++] = ios[i].stream;
+            }
+            ios[i].stream = j;
+        }
+        k = used;
     }
-    for (int w = 0; w < k; w++) pthread_join(th[w], NULL);
+    if (!k) return 0;
+    if (k == 1) {
+        args[0] = (struct sw_arg){ ios, nio, 0, cls, 1, 1 };
+        sw_worker(&args[0]);
+    } else {
+        int started[MAXK] = {0};
+        for (int w = 0; w < k; w++) {
+            args[w] = (struct sw_arg){ ios, nio, w, cls, k, 1 };
+            started[w] = pthread_create(&th[w], NULL, sw_worker, &args[w]) == 0;
+            if (!started[w]) sw_worker(&args[w]);
+        }
+        for (int w = 0; w < k; w++) if (started[w]) pthread_join(th[w], NULL);
+    }
     return now_ns() - t0;
 }
 
@@ -1192,6 +1363,63 @@ static u64 zns_striped_read(io_t *ios, int nio, int cls) {
     }
     for (int w = 0; w < k; w++) pthread_join(th[w], NULL);
     return now_ns() - t0;
+}
+
+/* Build bounded batches of 1 MiB placement chunks; NVMe commands remain
+ * 128 KiB. All batches finish before GC can move mappings or reset zones. */
+static int kv_adaptive_write(op_t *o, io_t *ios, u32 sid, u32 op_idx,
+                             u64 trace_ns, int measure, u64 *duration) {
+    obj_t *ob = &objs[o->obj];
+    u64 start = now_ns(), done = 0, round = 0;
+    kv_shared_note_live_obj_locked(o->obj);
+    while (done < o->len) {
+        int nio = 0;
+        u64 batch_pages = 0;
+        for (int chunk = 0; chunk < KSTRIPE && done < o->len; chunk++) {
+            int lane = kv_adaptive_lane(o->obj, o->len - done, round++);
+            int needs_zone = kv_lane_zone[lane] < 0 || kv_lane_wp[lane] == ZONE_CAP_PGS;
+            if (needs_zone && zns_allocatable_zone_count() <= kv_metadata_reserve + 1) {
+                if (nio) break; /* Submit before any relocation. */
+                if (kv_adaptive_make_room(sid, op_idx, trace_ns, o, measure) < 0) {
+                    kv_space_report(stderr, "allocation-failed");
+                    request_storage_stop(3, "zns_adaptive_no_reclaimable_space", sid, op_idx, trace_ns, o);
+                    return -1;
+                }
+                /* GC changed tails, counts and mappings: select again. */
+                lane = kv_adaptive_lane(o->obj, o->len - done, round++);
+            }
+            u64 n = o->len - done;
+            if (n > 256) n = 256; /* placement chunk, in 4 KiB pages */
+            u64 rem = kv_shared_lane_rem_locked(lane);
+            if (n > rem) n = rem;
+            u64 pg;
+            if (kv_shared_append_locked(o->obj, lane, n, &pg) < 0) {
+                /* With reservations held under kv_shared_mu this indicates
+                 * metadata consumed the remaining slot. Flush before retry. */
+                if (nio) break;
+                kv_space_report(stderr, "append-failed");
+                request_storage_stop(3, "zns_adaptive_out_of_zones", sid, op_idx, trace_ns, o);
+                return -1;
+            }
+            pthread_mutex_lock(&ob->mu);
+            obj_add_ext(ob, pg, n);
+            pthread_mutex_unlock(&ob->mu);
+            for (u64 p = 0; p < n; ) {
+                u64 cmd = n - p > CMD_PGS ? CMD_PGS : n - p;
+                ios[nio++] = (io_t){ pg + p, cmd, lane };
+                p += cmd;
+            }
+            if (kv_lane_owner[lane] == o->obj) kv_private_pages += n;
+            else kv_shared_pages += n;
+            done += n;
+            batch_pages += n;
+        }
+        zns_striped_write(ios, nio, measure ? C_KVWR : -1);
+        zns_note_user_write_pages(batch_pages, measure);
+    }
+    kv_adaptive_pressure();
+    *duration = now_ns() - start;
+    return 0;
 }
 
 static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u64 trace_ns) {
@@ -1225,6 +1453,12 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
                 exit(4);
             }
             pthread_mutex_unlock(&ob->mu); ob_locked = 0;
+
+            if (KV_ADAPTIVE_READY) {
+                if (kv_adaptive_write(o, ios, sid, op_idx, trace_ns, measure, &dur) < 0) goto fail;
+                pthread_mutex_unlock(&kv_shared_mu); kv_locked = 0;
+                goto acct;
+            }
 
             if (kv_shared_prepare_write_locked(o->obj, o->off, o->len,
                                                sid, op_idx, trace_ns, o, measure) < 0)
@@ -1470,7 +1704,8 @@ static int run_op(op_t *o, u64 *turn_stall, int measure, u32 sid, u32 op_idx, u6
         dur = burst(wr, ios, nio, wr ? 1 : QD, measure ? cls : -1);
     }
 acct:
-    if (MODE_ZNS && wr) zns_note_user_write_pages(o->len, measure);
+    if (MODE_ZNS && wr && !(KV_ADAPTIVE_READY && o->op == OP_WKV))
+        zns_note_user_write_pages(o->len, measure);
     if (o->op == OP_WKV && measure) lv_add(C_KVWR_OP, dur);
     if (o->op == OP_RKV && measure) lv_add(C_KVRD_OP, dur);
     if (o->op == OP_RKV && measure) lv_add(C_RESUME, dur);
@@ -1772,6 +2007,7 @@ static int write_outputs(const char *outp, const char *dev) {
 
     fprintf(out, "mode=%s tscale=%.3f qd=%d device=%s\n", MODE_ZNS ? "zns" : "conv", TSCALE, QD, dev);
     if (MODE_ZNS) {
+        if (KV_ADAPTIVE_READY) kv_space_report(out, "final");
         u64 user_wr_pgs = rprog_atomic_read_u64(&ZNS_USER_WRITE_PAGES);
         u64 host_copy_pgs = rprog_atomic_read_u64(&ZNS_HOST_COPY_PAGES);
         u64 host_write_pgs = user_wr_pgs + host_copy_pgs;
@@ -1885,13 +2121,19 @@ int main(int argc, char **argv) {
             MAX_ACTIVE_ZONES_ARG = strtoull(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--max-open-zones") || !strcmp(argv[i], "-A"))
             MAX_OPEN_ZONES_ARG = strtoull(argv[++i], NULL, 10);
+        else if (!strcmp(argv[i], "--kv-policy") && i + 1 < argc) {
+            const char *policy = argv[++i];
+            if (!strcmp(policy, "adaptive")) KV_ADAPTIVE = 1;
+            else if (!strcmp(policy, "legacy")) KV_ADAPTIVE = 0;
+            else { fprintf(stderr, "unknown KV policy: %s\n", policy); return 1; }
+        }
         else if (!strcmp(argv[i], "-k")) { 
             KSTRIPE = atoi(argv[++i]);
             if (KSTRIPE < 1) KSTRIPE = 1; 
             if (KSTRIPE > MAXK) KSTRIPE = MAXK; 
         }
     }
-    if (!tracef || !dev) { fprintf(stderr, "usage: replayer -t trace -d /dev/nvmeXnY -m conv|zns -o out [-s scale] [-q qd] [-j session_workers] [-k kv_stripes] [-A max_open_zones] [--max-active-zones n] [--progress-interval n] [--no-progress]\n"); return 1; }
+    if (!tracef || !dev) { fprintf(stderr, "usage: replayer -t trace -d /dev/nvmeXnY -m conv|zns -o out [-s scale] [-q qd] [-j session_workers] [-k kv_stripes] [-A max_open_zones] [--max-active-zones n] [--kv-policy adaptive|legacy] [--progress-interval n] [--no-progress]\n"); return 1; }
     TRACE_PATH = tracef;
     for (int c = 0; c < NCLS; c++) pthread_mutex_init(&LAT[c].mu, NULL);
     load_trace(tracef);
@@ -1956,6 +2198,13 @@ int main(int argc, char **argv) {
             if (!kv_lane_zone || !kv_lane_wp || !kv_zone_live || !kv_zone_used ||
                 !kv_zone_refs || !kv_obj_slot || !kv_active_obj || !kv_obj_gc_seen)
                 exit(9);
+            if (KV_ADAPTIVE) {
+                kv_lane_owner = calloc(KV_SHARED_LANES, sizeof(*kv_lane_owner));
+                kv_zone_written = calloc(N_ZONES, sizeof(*kv_zone_written));
+                if (!kv_lane_owner || !kv_zone_written) exit(9);
+                kv_metadata_reserve = zns_metadata_active_reserve();
+                KV_ADAPTIVE_READY = 1;
+            }
             for (int i = 0; i < KV_SHARED_LANES; i++) kv_lane_zone[i] = -1;
             for (u64 i = 0; i < n_objs + 2; i++) kv_obj_slot[i] = -1;
         }
@@ -1970,7 +2219,7 @@ int main(int argc, char **argv) {
         /* reset all zones to a clean state */
 #ifdef HAVE_BLKZONED
         struct blk_zone_range r = { .sector = 0, .nr_sectors = bytes / 512 };
-        if (ioctl(FD, BLKRESETZONE, &r) < 0) perror("initial BLKRESETZONE");
+        if (ioctl(FD, BLKRESETZONE, &r) < 0) { perror("initial BLKRESETZONE"); return 3; }
 #endif
     }
 
