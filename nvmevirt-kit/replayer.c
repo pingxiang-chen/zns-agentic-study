@@ -608,6 +608,12 @@ static void kv_shared_dec_live_range_locked(u64 pg, u64 len) {
 
 static void kv_shared_reset_zone_locked(int z) {
     if (z < 0 || (u64)z >= N_ZONES || !kv_zone_used[z]) return;
+    /* Callers hold kv_shared_mu and have completed all KV writes. A dead
+     * partial zone remains an append destination until it is physically full. */
+    if (kv_shared_zone_is_open_locked(z)) {
+        fprintf(stderr, "refusing to reset a partial KV zone %d\n", z);
+        exit(4);
+    }
     int was_open = 0;
     for (int i = 0; i < KV_SHARED_LANES; i++) {
         if (kv_lane_zone[i] == z) {
@@ -630,8 +636,9 @@ static int kv_shared_pick_victim_locked(int allow_relocation) {
     u64 best_live = UINT64_MAX;
     for (u64 z = 0; z < N_ZONES; z++) {
         if (!kv_zone_used[z]) continue;
-        if (!kv_zone_live[z]) return (int)z;
+        /* Keep dead tails too: later objects can consume their capacity. */
         if (kv_shared_zone_is_open_locked((int)z)) continue;
+        if (!kv_zone_live[z]) return (int)z;
         if (kv_zone_live[z] >= ZONE_CAP_PGS) continue;
         if (!allow_relocation) continue;
         if (kv_zone_live[z] < best_live) {
@@ -736,7 +743,7 @@ static int kv_shared_compact_obj_from_zone_locked(u32 obj, int victim,
 static int kv_shared_compact_zone_locked(int victim, u32 sid, u32 op_idx, u64 trace_ns, const op_t *op,
                                              int measure) {
     if (victim < 0 || (u64)victim >= N_ZONES || !kv_zone_used[victim]) return 0;
-    if (kv_zone_live[victim] && kv_shared_zone_is_open_locked(victim)) return 0;
+    if (kv_shared_zone_is_open_locked(victim)) return 0;
 
     u64 epoch = ++kv_gc_epoch;
     if (!epoch && kv_obj_gc_seen) {
@@ -902,14 +909,19 @@ static void kv_adaptive_pressure(void) {
  * of the slot budget. Drain existing tails when the allowance shrinks. */
 static int kv_adaptive_lane(u32 obj, u64 remaining, u64 round) {
     kv_adaptive_pressure();
-    int owned[MAXK], count = 0, free_lane = -1, shared = -1;
+    int owned[MAXK], count = 0, free_lane = -1, shared = -1, reusable = -1;
     for (int i = 1; i < KV_SHARED_LANES; i++) {
         int partial = kv_lane_zone[i] >= 0 && kv_lane_wp[i] < ZONE_CAP_PGS;
         if (!partial) {
             kv_lane_owner[i] = 0;
             if (i >= 2 && free_lane < 0) free_lane = i;
+        } else if (!kv_zone_live[kv_lane_zone[i]]) {
+            /* The old owner has no live bytes here. Preserve the WP and
+             * transfer the fullest tail before opening another zone. */
+            if (reusable < 0 || kv_lane_wp[i] > kv_lane_wp[reusable]) reusable = i;
         } else if (kv_lane_owner[i] == obj && count < MAXK) owned[count++] = i;
-        else if (kv_lane_owner[i] == UINT32_MAX) shared = i;
+        else if (kv_lane_owner[i] == UINT32_MAX &&
+                 (shared < 0 || kv_lane_wp[i] > kv_lane_wp[shared])) shared = i;
     }
     int limit = 1;
     u64 sessions = LIVE_KV_SESSIONS ? LIVE_KV_SESSIONS : 1;
@@ -925,6 +937,11 @@ static int kv_adaptive_lane(u32 obj, u64 remaining, u64 round) {
         if ((u64)limit > large) limit = (int)large;
         if (limit < 1) limit = 1;
     }
+    if (count < limit && reusable >= 0) {
+        kv_lane_owner[reusable] = obj;
+        return reusable;
+    }
+    if (count < limit && shared >= 0) return shared;
     if (!kv_pressure && count < limit && free_lane >= 0 &&
         spare > kv_metadata_reserve + 2) {
         kv_lane_owner[free_lane] = obj;
@@ -949,7 +966,7 @@ static int kv_adaptive_lane(u32 obj, u64 remaining, u64 round) {
     int best = -1;
     for (int i = 2; i < KV_SHARED_LANES; i++) {
         if (kv_lane_zone[i] < 0 || kv_lane_wp[i] == ZONE_CAP_PGS) continue;
-        if (best < 0 || kv_lane_wp[i] < kv_lane_wp[best]) best = i;
+        if (best < 0 || kv_lane_wp[i] > kv_lane_wp[best]) best = i;
     }
     if (best >= 0) {
         kv_lane_owner[best] = UINT32_MAX;
@@ -1199,6 +1216,10 @@ static void zns_configure_open_zone_mux(void) {
     if (KV_OPEN_ZONE_LIMIT > 0x7fffffffULL) KV_OPEN_ZONE_LIMIT = 0x7fffffffULL;
     KV_SHARED = 1;
     KV_SHARED_LANES = (int)KV_OPEN_ZONE_LIMIT;
+    /* Legacy hashing should fill a small set of tails, rather than leave
+     * one partial zone per available device open slot. */
+    if (!KV_ADAPTIVE && KV_SHARED_LANES > KSTRIPE)
+        KV_SHARED_LANES = KSTRIPE;
     if (KV_ADAPTIVE && KV_SHARED_LANES < 3) {
         request_storage_stop(3, "zns_adaptive_needs_three_kv_slots", 0, 0, 0, NULL);
         return;

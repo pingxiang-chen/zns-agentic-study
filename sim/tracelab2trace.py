@@ -29,7 +29,7 @@ from collections import defaultdict
 
 PG = 4096
 GiB = 1073741824
-TT_PGS = int((16 * GiB) / PG)  # nvmevirt default geometry: 16 GiB raw
+TT_PGS = int((32 * GiB) / PG)  # nvmevirt default geometry: 32 GiB raw
 S = 1_000_000_000
 
 ap = argparse.ArgumentParser()

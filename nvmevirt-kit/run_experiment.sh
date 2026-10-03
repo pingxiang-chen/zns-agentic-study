@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+
 # Check if effective user ID is 0
 if [ "$(id -u)" -ne 0 ]; then
     echo "Error: This script must be run with sudo or as root." >&2
@@ -15,7 +16,7 @@ MODE=""
 SIZE=""
 K=""
 
-MEMORY_START="6G"
+MEMORY_START="8G"
 CPU_LIST="0,1"
 DEVICE="/dev/nvme3n1"
 TRACE="../traces/tr_occ90_10.txt"
@@ -45,6 +46,17 @@ Examples:
     sudo $0 mode=conv size=32GiB
     sudo $0 mode=zns size=32GiB k=16 output=out_zns_k16
 EOF
+}
+
+get_nvme_namespace() {
+    local model="$1"
+
+    nvme list | awk -v model="$model" '
+        index($0, model) {
+            print $1
+            exit
+        }
+    '
 }
 
 join_csv() {
@@ -182,6 +194,9 @@ for argument in "$@"; do
             ;;
     esac
 done
+
+
+device=$(get_nvme_namespace "CSL_Virt_MN_01")
 
 # -----------------------------
 # Validate arguments

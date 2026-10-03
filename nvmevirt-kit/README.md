@@ -114,6 +114,62 @@ WAF=... total_run_WAF=...
 `(user_wr_pgs + host_copy_pgs) / user_wr_pgs`. The `total_run_*` fields include
 warm-up as well.
 
+## Adaptive ZNS KV allocation
+
+ZNS replay defaults to `--kv-policy adaptive`. Use `--kv-policy legacy` to
+compare with the previous placement policy. `-k` is an upper bound on private
+write streams per session in adaptive mode; commands remain 128 KiB.
+
+The allocator prefers private session tails, so deletion can reset both full
+and partially filled zones without copying other sessions' data. Large appends
+(at least two zone capacities remaining) may receive extra streams, limited by
+live-session count, lane slots and spare capacity. Placement chunks are up to
+1 MiB and are split into ordinary commands. Existing tails drain when the
+stream allowance shrinks.
+
+Under pressure, new allocations use one shared tail. If opening that tail
+would consume reserved headroom, an existing private tail is lent to the shared
+pool. Its old mappings remain valid, but its zone now requires all owners to
+finish or GC to relocate survivors before reset. Pressure enters when
+allocatable zones fall to `metadata_reserve + 2 + zone_count/20`, or live KV
+pages exceed 85% of writable zone capacity. It exits only above an additional
+`2 + zone_count/20` zones of headroom and below 80% live occupancy.
+
+Lane 0 is reserved for sequential GC copies. Foreground and metadata allocations
+cannot consume the last empty zone or active-zone slot. KV allocations also
+leave the metadata budget available. Dead current zones are reset immediately
+on deletion. Reset failures terminate replay instead of recycling a zone whose
+reset failed. Allocation is reconsidered after GC; it does not reuse a stale
+whole-write estimate.
+
+`ZNS_SPACE[final]` in the summary and failure diagnostics report KV live,
+invalid and unwritten tail pages, sampled peak tails, empty/allocatable zones,
+active zones, private/shared placement page counts and policy changes. All
+these counters include warm-up. Metadata is excluded from the KV page counts;
+empty and active zone counts cover the entire device. Private placement counts
+are historical: a private tail can later become shared.
+
+KV I/O remains serialized across sessions by the existing allocator mutex;
+multiple streams provide parallelism within a batch. The allocator conservatively
+bounds partial-zone slots instead of implementing idle-zone close/reopen. It
+cannot guarantee completion when live data, metadata and required reserve
+exceed available capacity. Adaptive mode requires at least three KV lane slots
+after metadata and active-zone reservations.
+
+Validation with mocked device I/O:
+
+```bash
+make test
+make test ZNS_TRACE=../traces/nvme_occ90.txt
+TEST_ZONE_COUNT=512 TEST_K=8 make test ZNS_TRACE=../traces/nvme_occ90.txt
+```
+
+The optional ZNS trace test runs KV writes/deletes in nominal trace order with
+64 MiB zones (640 by default), an active-zone limit of 128, and reserved metadata
+space. It checks sequential writes and live extent accounting. It does not
+simulate device latency or metadata I/O, so hardware replay is still required
+for performance and end-to-end capacity results.
+
 ## What to expect
 
 The simulator (FEMU-lineage FTL model) predicts, at ~0.86 steady-state

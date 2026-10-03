@@ -23,7 +23,7 @@ import argparse, json, sys, math
 
 PG = 4096
 GiB = 1073741824
-TT_PGS = int((40 * GiB) / PG)  # nvmevirt default geometry: 40 GiB raw
+TT_PGS = int((32 * GiB) / PG)  # nvmevirt default geometry: 40 GiB raw
 S = 1_000_000_000
 BLK_TOK = 512
 PGS_PER_TOK = 8                 # 32 KiB/token (Q4)

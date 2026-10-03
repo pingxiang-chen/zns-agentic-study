@@ -10,7 +10,8 @@ test:
 	  -Wl,--wrap=aio_write,--wrap=aio_read,--wrap=aio_suspend,--wrap=aio_error,--wrap=aio_return \
 	  -Wl,--wrap=ioctl,--wrap=pwrite,--wrap=pread; \
 	"$$test_bin"; \
-	if [ -n "$(TRACE)" ]; then "$$test_bin" --trace "$(TRACE)"; fi
+	if [ -n "$(TRACE)" ]; then "$$test_bin" --trace "$(TRACE)"; fi; \
+	if [ -n "$(ZNS_TRACE)" ]; then "$$test_bin" --zns-trace "$(ZNS_TRACE)"; fi
 
 clean:
 	rm -f replayer

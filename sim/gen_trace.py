@@ -3,7 +3,7 @@
 Agentic-LLM SSD offloading workload generator (edge workstation scenario).
 
 Models N concurrent agent sessions on a resource-constrained box
-(single consumer GPU, one 40 GiB-scale emulated NVMe SSD):
+(single consumer GPU, one 32 GiB-scale emulated NVMe SSD):
   - per-session KV-cache blob on SSD: initial context offload after first
     prefill, per-turn decode deltas appended (write-through), full-blob
     resume read on GPU-cache miss (TTFT-critical), whole-blob delete at
@@ -28,7 +28,7 @@ import argparse, heapq, random, json, math, sys
 
 PG = 4096
 GiB = 1073741824
-TT_PGS = int((16 * GiB) / PG)
+TT_PGS = int((32 * GiB) / PG)
 S = 1_000_000_000
 
 def main():
