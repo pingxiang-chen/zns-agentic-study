@@ -1,6 +1,6 @@
 # ZoneServe: Tail Latency Reduction with Host-guided Data Management
 
-Run the commands below from `nvmevirt-kit/` on the Linux host that will provide the NVMeVirt device. **The runner unloads and reloads the `nvmev` kernel module and replays writes to the selected block device.** Check the device and memory reservation before running it. The commands assume the wrapper's default `/dev/nvme3n1`, reserved memory beginning at `8G`, and isolated CPUs `0,1`; change `DEVICE`, `MEMORY_START`, and `CPU_LIST` in `run_experiment.sh` if this host differs. The parent [NVMeVirt kit README](../../nvmevirt-kit/README.md) covers kernel setup and build prerequisites.
+Run the commands below from `nvmevirt-kit/` on the Linux host that will provide the NVMeVirt device. **The runner unloads and reloads the `nvmev` kernel module and replays writes to the selected block device.** Check the device and memory reservation before running it. The commands assume the wrapper's default `/dev/nvme3n1`, reserved memory beginning at `8G`, and isolated CPUs `0,1`; change `DEVICE`, `MEMORY_START`, and `CPU_LIST` in `run_experiment.sh` if this host differs. The parent [NVMeVirt kit README](nvmevirt-kit/README.md) covers kernel setup and build prerequisites.
 
 ## Prepare the trace and binaries
 
